@@ -1,0 +1,330 @@
+---
+title: "Hospital Reports: Identify and Process Hospital Closures"
+author: "Niklas Pawelzik"
+date: "2024-07-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Import and Prepare Datasets
+
+## Define Years and Paths
+
+```{r define-years-paths}
+# Define years for which hospital reports are available
+all_years_hospital_reports <- c(2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012, 2010, 2008)
+
+# Define cleaned data folder path
+path_clean_data_folder <- here("data", "reproducible", "hospital_reports_data")
+```
+
+## Import Dataframes
+
+```{r import-dataframes}
+# Generic function to load datasets per year
+load_hospital_data <- function(prefix) {
+  for (year in all_years_hospital_reports) {
+    file_path <- here(path_clean_data_folder, paste0(prefix, year, ".csv"))
+    assign(paste0(prefix, year), read_csv(file_path, show_col_types = FALSE), envir = .GlobalEnv)
+  }
+}
+
+# Import location, cases/beds, and staff datasets
+load_hospital_data("df_hospital_location_")
+load_hospital_data("df_hospital_cases_beds_")
+load_hospital_data("df_hospital_staff_")
+
+# Import the merged and geocoded locations reference dataframe
+df_hospital_location_merged_geocoded <- read_csv(
+  here(path_clean_data_folder, "df_hospital_location_merged_geocoded.csv"),
+  show_col_types = FALSE
+)
+```
+
+# Identify Closed Hospitals Across Years
+
+## Define Function to Find Unique IKs
+
+```{r function-find-unique-iks}
+# Function to find institutions appearing in one year but not in the following year
+find_unique_iks <- function(df_current, df_next) {
+  ik_current <- df_current$IK_Institutionskennzeichen
+  ik_next <- df_next$IK_Institutionskennzeichen
+
+  ik_only_current <- setdiff(ik_current, ik_next)
+
+  df_current %>%
+    filter(IK_Institutionskennzeichen %in% ik_only_current)
+}
+```
+
+## Apply Function Year by Year
+
+```{r find-last-appearance}
+# Apply the function across years to identify hospitals with last appearance in given year
+df_last_in_2021 <- find_unique_iks(df_hospital_location_2021, df_hospital_location_2022)
+df_last_in_2020 <- find_unique_iks(df_hospital_location_2020, df_hospital_location_2021)
+df_last_in_2019 <- find_unique_iks(df_hospital_location_2019, df_hospital_location_2020)
+df_last_in_2018 <- find_unique_iks(df_hospital_location_2018, df_hospital_location_2019)
+df_last_in_2017 <- find_unique_iks(df_hospital_location_2017, df_hospital_location_2018)
+df_last_in_2016 <- find_unique_iks(df_hospital_location_2016, df_hospital_location_2017)
+df_last_in_2015 <- find_unique_iks(df_hospital_location_2015, df_hospital_location_2016)
+df_last_in_2014 <- find_unique_iks(df_hospital_location_2014, df_hospital_location_2015)
+df_last_in_2013 <- find_unique_iks(df_hospital_location_2013, df_hospital_location_2014)
+df_last_in_2012 <- find_unique_iks(df_hospital_location_2012, df_hospital_location_2013)
+df_last_in_2010 <- find_unique_iks(df_hospital_location_2010, df_hospital_location_2012)
+df_last_in_2008 <- find_unique_iks(df_hospital_location_2008, df_hospital_location_2010)
+
+# Special case for 2015, merging 2016 and 2017 due to data quality issue
+df_2016_for_2015 <- as.data.frame(lapply(df_hospital_location_2016, as.character))
+df_2017_for_2015 <- as.data.frame(lapply(df_hospital_location_2017, as.character))
+df_closed_hospitals_20162017 <- bind_rows(df_2016_for_2015, df_2017_for_2015)
+df_last_in_2015_20162017 <- find_unique_iks(df_hospital_location_2015, df_closed_hospitals_20162017)
+```
+
+
+## Manual review of closures per year
+
+```{r manual_closure_review_2008}
+# Review distinct IK codes for 2008 to determine true closures
+nrow(distinct(df_last_in_2008, IK_Institutionskennzeichen))
+
+# Define manually identified closed hospitals for 2008
+IK_closed_hospitals_2008 <- c(260101466, 260330145, 260510859, 260531080, 260571648, 
+                              260592459, 260620545, 260640721, 260720421, 260811136, 
+                              260811739, 260812160, 260831675, 260910034, 260930539, 261401007)
+
+# Filter closed hospitals from 2008
+
+# Ensure consistency in types
+IK_closed_hospitals_2008 <- as.character(IK_closed_hospitals_2008)
+
+df_closed_hospitals_2008 <- df_last_in_2008 %>%
+  filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2008) %>%
+  mutate(across(everything(), as.character))
+```
+
+```{r manual_closure_review_2010}
+# Review distinct IK codes for 2010
+nrow(distinct(df_last_in_2010, IK_Institutionskennzeichen))
+
+# Define manually identified closed hospitals for 2010
+IK_closed_hospitals_2010 <- c(260310722, 260320542, 260320882, 260510267, 260511155, 
+                              260590594, 260590663, 260590787, 260592415, 260620102, 
+                              260620293, 260620373, 260620567, 260720056, 260830060, 260831094, 
+                              260831642, 260841713)
+
+# Filter closed hospitals from 2010
+IK_closed_hospitals_2010 <- as.character(IK_closed_hospitals_2010)
+
+df_closed_hospitals_2010 <- df_last_in_2010 %>%
+  filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2010) %>%
+  mutate(across(everything(), as.character))
+```
+
+```{r manual_closure_review_2012}
+# Review distinct IK codes for 2012
+nrow(distinct(df_last_in_2012, IK_Institutionskennzeichen))
+
+# Define manually identified closed hospitals for 2012
+IK_closed_hospitals_2012 <- c(260330463, 260340318, 260340352, 260511451, 260730332, 260920252)
+
+# Filter closed hospitals from 2012
+IK_closed_hospitals_2012 <- as.character(IK_closed_hospitals_2012)
+
+df_closed_hospitals_2012 <- df_last_in_2012 %>%
+  filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2012) %>%
+  mutate(across(everything(), as.character))
+```
+
+```{r manual_closure_review_2013}
+# Review distinct IK codes for 2013
+nrow(distinct(df_last_in_2013, IK_Institutionskennzeichen))
+
+# Define manually identified closed hospitals for 2013
+IK_closed_hospitals_2013 <- c(260320223, 260330704, 260341079, 260731208, 260830890, 260970754, 261102129)
+
+# Filter closed hospitals from 2013
+IK_closed_hospitals_2013 <- as.character(IK_closed_hospitals_2013)
+
+df_closed_hospitals_2013 <- df_last_in_2013 %>%
+  filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2013) %>%
+  mutate(across(everything(), as.character))
+```
+
+```{r manual_closure_review_2014}
+# Review distinct IK codes for 2014
+nrow(distinct(df_last_in_2014, IK_Institutionskennzeichen))
+
+# Define manually identified closed hospitals for 2014
+IK_closed_hospitals_2014 <- c(260102069, 260320860, 260321532, 260330474, 260531251, 
+                              260590231, 260593461, 260641642, 260720502, 260730354, 
+                              260820046, 260833508, 260912742, 260920708, 510654114)
+
+# Filter closed hospitals from 2014
+IK_closed_hospitals_2014 <- as.character(IK_closed_hospitals_2014)
+
+df_closed_hospitals_2014 <- df_last_in_2014 %>%
+  filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2014) %>%
+  mutate(across(everything(), as.character))
+```
+
+```{r}
+# 2015 (using comparison to 2016/2017 merged dataset)
+IK_closed_hospitals_2015 <- c(260310232, 260310517, 260330613, 260531002, 260611407, 260731219, 260912252, 260930312, 261600974, 510571498)
+
+  df_closed_hospitals_2015 <- df_last_in_2015_20162017 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2015) %>%
+    mutate(across(everything(), as.character))
+
+```
+
+```{r}
+# 2017
+IK_closed_hospitals_2017 <- c(260320278, 260321725, 260321747, 260321758, 260330602, 260970629, 510571205)
+
+df_closed_hospitals_2017 <- df_last_in_2017 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2017) %>%
+    mutate(across(everything(), as.character))
+```
+
+```{r}
+# 2018
+IK_closed_hospitals_2018 <- c(260100329, 260550391, 260832701, 260840983, 260912081, 260950965)
+
+df_closed_hospitals_2018 <- df_last_in_2018 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2018) %>%
+    mutate(across(everything(), as.character))
+```
+
+```{r}
+# 2019
+IK_closed_hospitals_2019 <- c(260330327, 260340454, 260550881, 260590936, 260640060, 260700143, 260832789, 261000206, 261000262, 261500085, 261510043)
+
+df_closed_hospitals_2019 <- df_last_in_2019 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2019) %>%
+    mutate(across(everything(), as.character))
+```
+
+```{r}
+# 2020
+IK_closed_hospitals_2020 <- c(260101079, 260593724, 260810681, 260822220, 260840471, 260930323)
+
+df_closed_hospitals_2020 <- df_last_in_2020 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2020) %>%
+    mutate(across(everything(), as.character))
+```
+
+```{r}
+
+# 2021
+IK_closed_hospitals_2021 <- c(260310323, 260330715, 260330851, 260340795, 261500483, 260530728, 260590059, 260711260, 260913550, 261400119)
+
+df_closed_hospitals_2021 <- df_last_in_2021 %>%
+    filter(IK_Institutionskennzeichen %in% IK_closed_hospitals_2021) %>%
+    mutate(across(everything(), as.character))
+```
+
+# Merge Annual Hospital Closure Datasets into Combined Dataframe
+
+```{r merge_closures_combined}
+# Combine hospital closure datasets from multiple years into a single dataframe
+
+df_hospital_closures_combined <- bind_rows(
+  df_closed_hospitals_2008,
+  df_closed_hospitals_2010,
+  df_closed_hospitals_2012,
+  df_closed_hospitals_2013,
+  df_closed_hospitals_2014,
+  df_closed_hospitals_2015,
+  df_closed_hospitals_2017,
+  df_closed_hospitals_2018,
+  df_closed_hospitals_2019, 
+  df_closed_hospitals_2020, 
+  df_closed_hospitals_2021
+)
+
+# Harmonize data types for selected columns
+df_hospital_closures_combined <- df_hospital_closures_combined %>%
+  mutate(
+    year = as.factor(year),
+    Datum = as.Date(Datum),
+    IK_Institutionskennzeichen = as.double(IK_Institutionskennzeichen)
+  )
+```
+
+```{r Match Hospital Closures with Geocoded Hospital Locations}
+# Ensure 'year' is a factor in both datasets
+df_hospital_location_merged_geocoded <- df_hospital_location_merged_geocoded %>%
+  dplyr::mutate(year = as.factor(year))
+
+# Semi-join: match only those closures that exist in the geocoded dataset
+df_hospital_closures_combined_geocoded <- dplyr::semi_join(
+  df_hospital_location_merged_geocoded,
+  df_hospital_closures_combined,
+  by = c("Name", "Datum", "IK_Institutionskennzeichen", "year")
+)
+
+
+```
+
+```{r Enrich Hospital Closures with Manual Closure Reasons}
+# Read reasons file
+reasons_raw <- readr::read_lines(here::here(
+  "data", "supplementary_files", "reasons_file.txt"))
+
+# Parse into dataframe
+reasons_df <- tibble::tibble(
+  IK_Institutionskennzeichen = stringr::str_extract(reasons_raw, "(?<=# )\\d+"),
+  closure_context_info = stringr::str_extract(reasons_raw, "(?<=;;;).*?(?=;;;\\s?\\d{4}|;;;\\s?NA)"),
+  year_of_closure = stringr::str_extract(reasons_raw, "(?<=;;;)([^;]+)$")
+) %>%
+  dplyr::mutate(
+    IK_Institutionskennzeichen = as.character(IK_Institutionskennzeichen),
+    year_of_closure = dplyr::na_if(stringr::str_trim(year_of_closure), "NA"),
+    year_of_closure = as.factor(year_of_closure)
+  )
+
+# Merge manual reasons into the geocoded closure data
+df_hospital_closures_combined_geocoded <- df_hospital_closures_combined_geocoded %>%
+  dplyr::mutate(IK_Institutionskennzeichen = as.character(IK_Institutionskennzeichen)) %>%
+  dplyr::left_join(reasons_df, by = "IK_Institutionskennzeichen") %>%
+  dplyr::mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen))
+
+
+```
+
+```{r}
+# Prepare list of all staff datasets
+staff_dfs <- list(
+  df_hospital_staff_2008, df_hospital_staff_2010, df_hospital_staff_2012,
+  df_hospital_staff_2013, df_hospital_staff_2014, df_hospital_staff_2015,
+  df_hospital_staff_2016, df_hospital_staff_2017, df_hospital_staff_2018,
+  df_hospital_staff_2019, df_hospital_staff_2020, df_hospital_staff_2021
+)
+
+# Harmonize and combine
+df_hospital_staff_all_years <- dplyr::bind_rows(
+  purrr::map(staff_dfs, ~ dplyr::mutate(.x, dplyr::across(dplyr::everything(), as.character)))
+) %>%
+  dplyr::select(
+    IK_Institutionskennzeichen, year, Anzahl_Aerzte_VK_ohne_beleg, Anzahl_VK_gesundheits_krankenpfleger
+  ) %>%
+  dplyr::mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen))
+
+# Merge with closure info
+df_hospital_closures_info_combined <- df_hospital_staff_all_years %>%
+  dplyr::inner_join(df_hospital_closures_combined_geocoded, by = c("IK_Institutionskennzeichen", "year")) %>%
+  dplyr::mutate(
+    Anzahl_Aerzte_VK_ohne_beleg = as.numeric(stringr::str_replace(Anzahl_Aerzte_VK_ohne_beleg, ",", ".")),
+    Anzahl_VK_gesundheits_krankenpfleger = as.numeric(stringr::str_replace(Anzahl_VK_gesundheits_krankenpfleger, ",", ".")),
+    staff_doctors_nurses_numeric = dplyr::coalesce(Anzahl_Aerzte_VK_ohne_beleg, 0) + 
+                                   dplyr::coalesce(Anzahl_VK_gesundheits_krankenpfleger, 0)
+  ) %>%
+  dplyr::select(-dplyr::starts_with("Node1"), -dplyr::starts_with("POC_"))
+
+```
+

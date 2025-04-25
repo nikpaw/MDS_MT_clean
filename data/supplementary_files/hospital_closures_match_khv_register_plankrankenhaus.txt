@@ -1,0 +1,112 @@
+35647 last match df_khv_2021 
+99755 no match
+26382 last match df_khv_2013 
+49685 last match df_khv_2013 
+44879 last match df_khv_2022 
+21376 last match df_khv_2014 
+47877 last match df_khv_2013 
+38102 last match df_khv_2015
+54673 no match
+34346 last match df_khv_2015 
+83043 last match df_khv_2018 
+31832 last match df_khv_2015
+94065 last match df_khv_2012
+84066 no match 
+77704 last match df_khv_2021
+79677 last match df_khv_2010
+6846  last match df_khv_2022
+21379 last match df_khv_2013
+32457 no match
+82380 last match df_khv_2011 (seemed to ave a new hospital after some years)
+51789 no match
+31675 last match df_khv_2016
+49124 last match df_khv_2019
+71672 last match df_khv_2020
+73732 last match df_khv_2011
+29633 last match df_khv_2014
+53332 last match df_khv_2014
+76530 last match df_khv_2013
+33617 last match df_khv_2022
+33617 last match df_khv_2022
+33617 last match df_khv_2022
+60528 last match df_khv_2020
+82335 last match df_khv_2015
+66482 last match df_khv_2016
+49201 last match df_khv_2013
+52441 last match df_khv_2022
+64678 last match df_khv_2014 
+57334 no match 
+87534 last match df_khv_2014
+27239 last match df_khv_2014
+54292 last match df_khv_2010 different hospital opened in same postal code in df_khv_2022
+44263 last match df_khv_2022
+88316 last match df_khv_2010
+73207 no match
+83410 no match
+42853 no match
+40789 df_khv_2012
+31199 df_khv_2016
+34385 df_khv_2010
+31655 df_khv_2022
+49076 df_khv_2022
+36251 df_khv_2022
+54293 df_khv_2015 df_khv_2020
+58332 df_khv_2012
+47167 df_khv_2009
+21335 df_khv_2020
+41844 df_khv_2016
+58762 df_khv_2014
+58762 df_khv_2014
+88477 df_khv_2021
+39539 to be excluded since unclear
+27404 df_khv_2018
+79098 df_khv_2012
+95652 df_khv_2008
+90763 df_khv_2020
+34121 df_khv_2011
+61231 to be excluded, no Plankrankenhaus
+37170 df_khv_2011
+58642  df_khv_2019
+14199  df_khv_2013
+78126 no match
+73525 df_khv_2010
+66564 df_khv_2020
+65439  df_khv_2016
+57392 df_khv_2011
+29221 df_khv_2009
+34212 to be excluded, unclear
+24943 no match
+74405 df_khv_2008
+75323 df_khv_2021
+89257 df_khv_2021
+66679 df_khv_2020
+37627 df_khv_2011
+92311 no match
+01326 df_khv_2009
+22926 df_khv_2009
+24534 df_khv_2018
+34576 df_khv_2009
+58739 df_khv_2011
+85051 df_khv_2009
+21682 to be excluded, no Plankrankenhaus
+33142 df_khv_2009
+27476 df_khv_2021
+59821 to be excluded since unclear
+23845 df_khv_2021
+78713 df_khv_2011
+48607 df_khv_2019
+8468 no match
+88250 df_khv_2019
+30449 df_khv_2010
+6493 no match
+92331 to be excluded, no Plankrankenhaus
+56130 df_khv_2022
+79618 to be excluded, no Plankrankenhaus
+55218 to be excluded, unclear
+55218 to be excluded, unclear
+31737 df_khv_2022
+77773 df_khv_2021
+48703 df_khv_2022
+67547 df_khv_2015
+67547 df_khv_2015
+38678 df_khv_2022

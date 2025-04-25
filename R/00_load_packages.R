@@ -14,3 +14,4 @@ if (length(missing_packages) > 0) {
 
 # Load all packages
 invisible(lapply(required_packages, library, character.only = TRUE))
+

@@ -1,0 +1,57 @@
+---
+title: "02 KHV Load Processed Data"
+author: "Niklas Pawelzik"
+date: "2024-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r Import Geocoded Data from KHV}
+# Define all years for which geocoded slim datasets exist
+all_years_khv <- c(2022, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
+
+# Initialize an empty list to store yearly geocoded datasets
+list_khv_geocoded <- list()
+
+# Loop through each year and import the corresponding geocoded CSV
+for (year in all_years_khv) {
+  file_path <- here::here("data", "reproducible", "khv_data", paste0("df_khv_", year, "_slim_geocoded.csv"))
+  
+  if (fs::file_exists(file_path)) {
+    df <- readr::read_csv(file_path, show_col_types = FALSE)
+    list_khv_geocoded[[as.character(year)]] <- df
+  }
+}
+
+```
+
+```{r Check for Potential Duplicate Entries and Manual Inspection of Specific Duplicate Cases}
+# Focus on the 2022 dataset for duplication checks
+df_khv_2022_geocoded <- list_khv_geocoded[["2022"]]
+
+# Identify duplicate entries based on a combination of Name and Adresse
+duplicates_found <- duplicated(df_khv_2022_geocoded[, c("Name", "Adresse")])
+
+# Summarize duplication results
+if (any(duplicates_found)) {
+  message("There are duplicate rows based on the combination of Name and Adresse.")
+  print(df_khv_2022_geocoded[duplicates_found, ])
+} else {
+  message("All rows are unique based on the combination of Name and Adresse.")
+}
+
+# Filter manually for a known manually confirmed problematic hospital entry
+filtered_rows <- dplyr::filter(df_khv_2022_geocoded, Name == "Klinikum St. Georg GmbH, Hauptstandort Leipzig Eutritzsch, PIA - VGP Eitingonstr.")
+
+# Confirm whether the duplicate rows are fully identical across all columns
+if (nrow(filtered_rows) <= 1 || all(sapply(2:nrow(filtered_rows), function(i) identical(filtered_rows[1, ], filtered_rows[i, ])))) {
+  message("All filtered rows are identical across all columns.")
+} else {
+  message("The filtered rows are not identical across all columns.")
+}
+```
+

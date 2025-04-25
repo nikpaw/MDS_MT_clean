@@ -1,0 +1,212 @@
+---
+title: "03_merge_data_from_sources"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+# Define processing function
+process_khv_dataframe <- function(df) {
+  if ("PLZ" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = as.character(PLZ))
+  } else if ("Adresse_Postleitzahl_Standort" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = as.character(Adresse_Postleitzahl_Standort))
+  } else if ("Adresse _Zustellbezogene Postleitzahl und Ort" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = stringr::str_extract(`Adresse _Zustellbezogene Postleitzahl und Ort`, "\\d{5}"))
+  } else {
+    df <- dplyr::mutate(df, Postleitzahl = NA_character_)
+  }
+  
+  if ("EinrichtungsTyp" %in% colnames(df)) {
+    df <- dplyr::filter(df, EinrichtungsTyp == 2)
+  } else if ("Art" %in% colnames(df)) {
+    df <- dplyr::filter(df, Art == 2)
+  }
+
+  return(df)
+}
+
+# Process all KHV geocoded datasets
+processed_khv_list <- purrr::map(list_khv_geocoded, process_khv_dataframe)
+```
+
+```{r match_closures_to_khv}
+# Match closure postal codes to KHV data
+
+df_hospital_closures_combined_geocoded_continue_match_KHV <- df_hospital_closures_info_combined %>%
+  dplyr::mutate(
+    match_found = purrr::map_lgl(Postleitzahl, function(plz) {
+      any(purrr::map_lgl(processed_khv_list, function(df) plz %in% df$Postleitzahl))
+    }),
+    matching_dfs = purrr::map_chr(Postleitzahl, function(plz) {
+      matched <- purrr::imap_chr(processed_khv_list, function(df, name) {
+        if (plz %in% df$Postleitzahl) name else NA_character_
+      })
+      paste(na.omit(matched), collapse = "; ")
+    })
+  )
+```
+
+### Import Manual Research Data on Last Match to KHV Register
+
+```{r import_manual_match_data}
+# Read manually confirmed last matches file
+file_path_manual_match <- here::here("data", "supplementary_files", "hospital_closures_match_khv_register_plankrankenhaus.txt")
+
+lines_manual_match <- readLines(file_path_manual_match)
+
+# Parse lines into dataframe
+df_hospital_closures_last_match_khv_plankrankenhaus <- tibble::tibble(
+  Postleitzahl = stringr::str_extract(lines_manual_match, "^[0-9]+"),
+  info_last_match_khv = stringr::str_trim(stringr::str_remove(lines_manual_match, "^[0-9]+\\s+"))
+) %>%
+  dplyr::mutate(
+    year_last_match_khv_confirmed = as.integer(stringr::str_extract(info_last_match_khv, "\\d{4}"))
+  )
+```
+
+---
+
+### Merge Confirmed Matches into Closure Data
+
+```{r merge_manual_closure_matches}
+# Merge manually confirmed matches with closures
+
+df_hospital_closures_combined_geocoded_continue_match_KHV_updated <- df_hospital_closures_combined_geocoded_continue_match_KHV %>%
+  dplyr::left_join(
+    df_hospital_closures_last_match_khv_plankrankenhaus %>%
+      dplyr::select(Postleitzahl, info_last_match_khv, year_last_match_khv_confirmed),
+    by = "Postleitzahl",
+    multiple = "any"
+  )
+```
+
+---
+
+### Filter Confirmed Closures and Excluded Cases
+
+```{r filter_confirmed_and_excluded}
+# Filter confirmed and excluded closures
+
+df_confirmed_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  dplyr::filter(!is.na(year_last_match_khv_confirmed) & !is.na(year_of_closure))
+
+df_excluded_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  dplyr::filter(!is.na(year_last_match_khv_confirmed) & is.na(year_of_closure))
+
+# Print counts
+cat("Confirmed closures:", nrow(df_confirmed_closures), "\n")
+cat("Excluded closures (uncertain closure year):", nrow(df_excluded_closures), "\n")
+
+# Define study years
+years_own_study <- 2010:2020
+```
+
+---
+
+```{r visualization_of_closures}
+# Define the years covered in each study and statistics
+all_years_of_data <- 2003:2023
+years_preusker <- 2003:2013
+
+# Extract number of confirmed closures from own research (convert to numeric and ensure all years are covered)
+own_research_closures <- table(df_confirmed_closures$year_of_closure) * -1
+
+# Convert to a named numeric vector with all years explicitly included (default missing years to 0)
+own_research_closures_full <- setNames(rep(0, length(all_years_of_data)), all_years_of_data)
+own_research_closures_full[names(own_research_closures)] <- own_research_closures
+
+# Official hospital numbers (2002-2023)
+official_hospital_numbers <- c(
+  2221, 2197, 2166, 2139, 2104, 2087, 2083, 2084, 2064, 2045, 2017, 1996, 
+  1980, 1956, 1951, 1942, 1925, 1914, 1903, 1887, 1893, 1874
+)
+
+# Compute annual net change in the number of hospitals (official statistics)
+official_hospital_numbers_annual_change <- diff(official_hospital_numbers)
+
+# Define confirmed closures as per Preusker et al.
+preusker_closures <- c(
+  -12, -10, -4, -7, -8, -1, -5, -4, -7, -10, -6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+)
+
+# Create dataframe with years 2003-2023
+df_hospital_closure_analysis <- tibble::tibble(
+  Year = all_years_of_data,
+  `Official Net Change` = official_hospital_numbers_annual_change,
+  `Confirmed Closures Preusker (2003–13)` = preusker_closures,
+  `Confirmed Closures Own Research (2010–20)` = as.numeric(own_research_closures_full[as.character(all_years_of_data)])
+)
+
+# Convert dataframe to long format for visualization
+df_hospital_closure_analysis_long <- df_hospital_closure_analysis %>%
+  tidyr::pivot_longer(cols = -Year, names_to = "Statistic", values_to = "Change") %>%
+  tidyr::drop_na()
+
+# Create a histogram to compare all three statistics
+plot_hospital_closures_source_comparison <- ggplot2::ggplot(df_hospital_closure_analysis_long, ggplot2::aes(x = Year, y = Change, fill = Statistic)) +
+  ggplot2::geom_col(position = "dodge", width = 0.7) +
+  ggplot2::theme_minimal() +
+  ggplot2::scale_fill_manual(
+    values = c4a("brewer.dark2", n = 3)
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(-50, 10, by = 5),
+    minor_breaks = NULL
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(2002.5, 2020.5),
+    breaks = seq(2003, 2020, by = 1),
+    minor_breaks = NULL
+  ) +
+  ggplot2::labs(
+    title = NULL,
+    x = "Year",
+    y = "Annual Change in Hospital Numbers",
+    fill = NULL
+  ) +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.text = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 14),
+    axis.text = ggplot2::element_text(size = 12)
+  )
+
+# Print plot
+print(plot_hospital_closures_source_comparison)
+
+# Commented out: Save the plot manually later
+# ggplot2::ggsave("images/plot_hospital_closures_confirmed.png", width = 12, height = 5, dpi = 300)
+```
+
+```{r summarize_closure_ratios}
+# Extract relevant subsets from the dataset
+preusker_closures_subset <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_preusker) %>%
+  dplyr::summarise(total_preusker_closures = sum(`Confirmed Closures Preusker (2003–13)`, na.rm = TRUE))
+
+own_closures_subset <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_own_study) %>%
+  dplyr::summarise(total_own_closures = sum(`Confirmed Closures Own Research (2010–20)`, na.rm = TRUE))
+
+# Extract net change in hospital numbers from official statistics
+official_net_change_preusker <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_preusker) %>%
+  dplyr::summarise(total_official_change_preusker = sum(`Official Net Change`, na.rm = TRUE))
+
+official_net_change_own <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_own_study) %>%
+  dplyr::summarise(total_official_change_own = sum(`Official Net Change`, na.rm = TRUE))
+
+# Compute the ratios
+ratio_preusker <- preusker_closures_subset$total_preusker_closures / abs(official_net_change_preusker$total_official_change_preusker)
+ratio_own <- own_closures_subset$total_own_closures / abs(official_net_change_own$total_official_change_own)
+
+# Print results
+cat("Ratio of Preusker-confirmed closures to official net change (2003-2013):", round(ratio_preusker, 2), "\n")
+cat("Ratio of own-confirmed closures to official net change (2010-2020):", round(ratio_own, 2), "\n")
+```

@@ -1,5 +1,467 @@
 ---
-title: "01_khv_load_and_clean"
+title: "KHV_import"
+author: "Niklas Pawelzik"
+date: "2024-07-10"
 output: html_document
 ---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r Load KHV Excel Files}
+# Define path to KHV files (hospital directory)
+path_khv_base <- here::here("data", "raw", "khv_data")
+
+# Define years for standard and full loading
+years_standard <- c(2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
+years_all <- c(2022, years_standard)
+
+# Read all KHV Excel files into a named list
+list_khv_raw <- purrr::map(years_standard, function(year) {
+  file_path <- file.path(path_khv_base, paste0("KHV_", year, ".xlsx"))
+  readxl::read_excel(file_path, sheet = 5, skip = 4)
+}) %>%
+  rlang::set_names(years_standard)
+
+# Special handling for 2022 (different skip value)
+list_khv_raw[["2022"]] <- readxl::read_excel(
+  file.path(path_khv_base, "KHV_2022.xlsx"),
+  sheet = 5,
+  skip = 2
+)
+
+```
+
+```{r Add year Column to Each Dataset}
+list_khv <- purrr::imap(list_khv_raw, function(df, year) {
+  dplyr::mutate(df, year = as.numeric(year))
+})
+
+```
+
+```{r Create Unified Adresse Column}
+# Define address column variants
+primary_cols <- c("Straße/Hausnr", "PLZ", "Ort")
+alt1_cols <- c("Adresse _Strasse/Haus-Nr.", "Adresse _Zustellbezogene Postleitzahl und Ort")
+alt2_cols <- c("Adresse_Strasse_Standort", "Adresse_Haus-Nr._Standort", 
+               "Adresse_Postleitzahl_Standort", "Adresse_Ort_Standort")
+
+# Function to create "Adresse"
+create_adresse <- function(df) {
+  if (all(primary_cols %in% colnames(df))) {
+    df <- dplyr::mutate(df, Adresse = paste(df[["Straße/Hausnr"]], df[["PLZ"]], df[["Ort"]], sep = ", "))
+  } else if (all(alt1_cols %in% colnames(df))) {
+    df <- dplyr::mutate(df, Adresse = paste(df[[alt1_cols[1]]], df[[alt1_cols[2]]], sep = ", "))
+  } else if (all(alt2_cols %in% colnames(df))) {
+    df <- dplyr::mutate(df, Adresse = paste(
+      df[[alt2_cols[1]]], df[[alt2_cols[2]]], df[[alt2_cols[3]]], df[[alt2_cols[4]]], sep = ", "))
+  } else {
+    cat("Adresse columns missing for dataset.\n")
+  }
+  return(df)
+}
+
+# Apply
+list_khv <- purrr::map(list_khv, create_adresse)
+```
+
+```{r Create Unified Name Column, Standardize Column Names}
+# Define name column variants
+name_cols <- c("Name1", "Name2", "Name3", "Name4")
+alt_name1 <- c("Adresse _1. Zeile", "Adresse _2. Zeile", "Adresse _3. Zeile", "Adresse _3. Zeile")
+alt_name2 <- c("Adresse_Name", "Adresse_Name_Standort")
+
+# Function to create "Name"
+create_name <- function(df) {
+  if (all(name_cols %in% colnames(df))) {
+    df <- dplyr::mutate(df, Name = apply(df[, name_cols], 1, paste, collapse = ", "))
+  } else if (all(alt_name1 %in% colnames(df))) {
+    df <- dplyr::mutate(df, Name = apply(df[, alt_name1], 1, paste, collapse = ", "))
+  } else if (all(alt_name2 %in% colnames(df))) {
+    df <- dplyr::mutate(df, Name = apply(df[, alt_name2], 1, paste, collapse = ", "))
+  } else {
+    cat("Name columns missing for dataset.\n")
+  }
+  return(df)
+}
+
+# Apply
+list_khv <- purrr::map(list_khv, create_name)
+```
+
+```{r}
+# Rename "Träger" to "Traeger" and "Art" to "EinrichtungsTyp"
+list_khv <- purrr::map(list_khv, function(df) {
+  if ("Träger" %in% colnames(df)) {
+    df <- dplyr::rename(df, Traeger = "Träger")
+  }
+  if ("Art" %in% colnames(df)) {
+    df <- dplyr::rename(df, EinrichtungsTyp = "Art")
+  }
+  return(df)
+})
+```
+
+
+```{r Create "Slim" Versions and Combine}
+# Loop to recreate individual slim DataFrames (exact dirty behavior)
+for (year in years_all) {
+  
+  df <- list_khv[[as.character(year)]]
+  
+  if (!is.null(df)) {
+    # Add 'year' column again (in case)
+    df <- dplyr::mutate(df, year = as.numeric(year))
+    
+    # Create slim version
+    df_slim <- dplyr::select(df, dplyr::any_of(c("Name", "Adresse", "year", "Land", "Kreis", "Gemeinde", "Traeger", "EinrichtungsTyp")))
+    
+    # Assign into global environment with name like df_khv_2021_slim
+    assign(paste0("df_khv_", year, "_slim"), df_slim, envir = .GlobalEnv)
+  }
+}
+
+```
+
+```{r}
+# Create slim versions with consistent data types
+list_khv_slim <- purrr::map(list_khv, function(df) {
+  df %>%
+    dplyr::mutate(
+      Traeger = as.character(Traeger),
+      EinrichtungsTyp = as.character(EinrichtungsTyp)
+    ) %>%
+    dplyr::select(dplyr::any_of(c("Name", "Adresse", "year", "Land", "Kreis", "Gemeinde", "Traeger", "EinrichtungsTyp")))
+})
+
+# Combine
+df_khv_combined_slim <- dplyr::bind_rows(list_khv_slim)
+
+```
+
+## Geocode KHV Dataframes 
+
+```{r}
+# Extract all unique addresses from the full KHV dataset
+khv_unique_addresses <- df_khv_combined_slim %>%
+  dplyr::distinct(Adresse, .keep_all = TRUE)
+
+```
+
+```{r}
+# Perform initial geocoding attempt using full address strings via OpenStreetMap
+khv_unique_addresses_geocoded <- khv_unique_addresses %>%
+  tidygeocoder::geocode(Adresse, method = 'osm', lat = latitude, long = longitude)
+
+```
+
+```{r}
+# Filter geocoding failures (missing latitude) and attempt a simplified fallback strategy
+df_khv_na_coord <- khv_unique_addresses_geocoded %>%
+  dplyr::filter(is.na(latitude))
+
+# Extract fallback fields: postal code with town, and street name (excluding house number)
+df_khv_na_coord <- df_khv_na_coord %>%
+  dplyr::mutate(
+    postleitzahl_und_ort = stringr::str_extract(Adresse, "\\d{5},?\\s+(Bad\\s+\\w+|\\w+)"),
+    Strasse = stringr::str_extract(Adresse, "^[^\\d,]+"),
+    Ungefähre_Adresse = paste(Strasse, postleitzahl_und_ort, sep = ", ")
+  )
+
+```
+
+```{r}
+# Reattempt geocoding using the reduced address format
+df_khv_na_coord <- df_khv_na_coord %>%
+  tidygeocoder::geocode(Ungefähre_Adresse, method = 'osm', lat = latitude_ungefähr, long = longitude_ungefähr)
+
+```
+
+```{r}
+# Join geocoded coordinates back onto yearly datasets
+df_khv_2008_slim_geocoded <- df_khv_2008_slim %>%
+  dplyr::left_join(khv_unique_addresses_geocoded, by = "Adresse")
+# (Repeat for each year accordingly)
+
+```
+
+```{r}
+# Save un-geocoded fallback addresses for manual review
+path_na_coords <- here::here("data", "processed", "khv_data", "df_khv_na_coord.csv")
+readr::write_csv(df_khv_na_coord, path_na_coords)
+
+# Save geocoded result of all unique addresses
+path_geocoded_all <- here::here("data", "processed", "khv_data", "khv_unique_addresses_geocoded.csv")
+readr::write_csv(khv_unique_addresses_geocoded, path_geocoded_all)
+
+```
+
+```{r}
+# Re-import files for integration with final dataset (e.g., after manual coordinate completion)
+df_khv_na_coord_import <- readr::read_csv(path_na_coords)
+khv_unique_addresses_geocoded_import <- readr::read_csv(path_geocoded_all)
+
+```
+
+```{r}
+# Identify remaining addresses that still failed after geocoding attempts
+df_khv_na_coord_import_na <- df_khv_na_coord_import %>%
+  dplyr::filter(is.na(latitude_ungefähr)) %>%
+  dplyr::select(Name, year, Adresse, latitude, longitude, Ungefähre_Adresse, latitude_ungefähr, longitude_ungefähr)
+
+```
+
+```{r}
+# Insert manually retrieved coordinates in fixed order (aligned by row)
+coordinates <- c(
+  "54.3007378301664, 9.667209332011566",
+  "53.67280797386078, 10.241451411079519",
+  "53.730643860357944, 10.263394197590355",
+  "53.54874421200132, 9.98509339758018",
+  "53.595284674580384, 9.472673311075216",
+  "51.49223475180568, 6.515867239794519",
+  "51.06840456515223, 7.004709597443175",
+  "51.64193661380819, 7.33777329747444",
+  "51.65739745106946, 6.955756132666728",
+  "51.69078776841883, 7.1854151263129795",
+  "52.023373094583235, 8.523434868659498",
+  "50.54611578932454, 9.705155968579067",
+  "51.616092271838276, 9.590719826308879",
+  "51.11498581224855, 9.10916075511742",
+  "48.95724879530504, 9.135733310822653",
+  "48.34460046400002, 7.886185568462257",
+  "48.33429907421839, 8.348290497297606",
+  "48.35562195654074, 11.389692691265154",
+  "48.35380945642544, 11.785189539626879",
+  "49.412768593560436, 6.909779010846718",
+  "52.560425316716035, 13.447402439853306",
+  "53.42996502628423, 11.85468769757347",
+  "50.328775314711066, 12.289651936003716",
+  "51.03125322438338, 12.159282912784594",
+  "51.792626023114046, 10.954903797482668",
+  "50.889952503802846, 11.266260182090011",
+  "53.614369865955986, 10.02415579758383",
+  "50.42123125036706, 7.577408526244057",
+  "48.7829755163986, 9.171021754992855",
+  "48.898089496494904, 9.203880395476082",
+  "47.90734650522639, 7.700366197249361",
+  "48.00352563572804, 7.936729297280432",
+  "48.344562118171105, 7.886183682489674",
+  "47.95553419712632, 8.480241212621337",
+  "47.76316877292811, 8.838695241605368",
+  "48.50047971667056, 10.117473183813848",
+  "48.232538297297836, 12.674873210784714",
+  "48.35548610945312, 11.389742504796779",
+  "48.35442208266689, 13.20208358195523",
+  "53.429971418577026, 11.854698426409335",
+  "54.61637354766032, 8.984564968804616",
+  "54.373151466943334, 10.963546768790753",
+  "53.52976280417273, 8.615588011071466",
+  "51.29370558985879, 7.312290968619545",
+  "50.18665097154291, 8.456038410887956",
+  "50.35372154508464, 7.5869473820610915",
+  "48.00352563572804, 7.936729297280432",
+  "48.3343204712658, 8.348247581954142",
+  "47.763252983081145, 8.838248410760405",
+  "48.411105714477195, 9.941417581958197",
+  "48.35380945642544, 11.785189539626879",
+  "49.448861721620865, 10.999129982012837",
+  "52.56040574974825, 13.447380982181574",
+  "51.14242591351721, 13.033444459530912",
+  "51.27519204190517, 12.942737587239465",
+  "51.10581610819018, 10.65204421278866",
+  "50.88995927167952, 11.266313826269341",
+  "51.14242591351721, 13.033444459530912",
+  "48.3343204712658, 8.348247581954142",
+  "48.411105714477195, 9.941417581958197",
+  "53.52976280417273, 8.615588011071466",
+  "54.61637354766032, 8.984564968804616",
+  "51.29370558985879, 7.312290968619545",
+  "51.10581610819018, 10.65204421278866",
+  "48.06159652230864, 12.201976954462783",
+  "50.35360517157396, 7.5869473820610915",
+  "50.95487938923783, 13.754836159078318",
+  "47.81567997120982, 12.205747810763095",
+  "48.00352563572804, 7.936729297280432",
+  "54.37307647180737, 10.963514582283155",
+  "47.763252983081145, 8.838248410760405",
+  "50.889952503802846, 11.266260182090011",
+  "49.448861721620865, 10.999129982012837",
+  "53.57821386243095, 10.053005939910083",
+  "49.70639269700326, 7.677042740094822",
+  "51.16308912949025, 11.817079130985002",
+  "51.2340871539991, 6.82077908395976",
+  "51.97956225523396, 7.617505482149504",
+  "49.80901933245206, 6.690297294200677",
+  "47.76247275879023, 8.836043939067848",
+  "53.54477824736183, 13.294211782236403",
+  "51.61603897716075, 9.590676910965415",
+  "52.267073406145926, 12.925737811001154",
+  "51.409674103455345, 9.63575975513344",
+  "49.621774797572265, 7.335841229962489",
+  "53.54477824736183, 13.294211782236403",
+  "50.970426252598216, 13.461653528124781",
+  "51.29367875366837, 7.3123016974554105",
+  "50.9704532773021, 13.461610612781318",
+  "52.13738697196335, 11.624457468665746",
+  "47.747251728925654, 11.451417897267136",
+  "54.37315136854216, 10.96353636879082",
+  "51.409674103455345, 9.63575975513344",
+  "52.444155828430695, 9.740024268682692",
+  "51.97684609090119, 7.617516739821061",
+  "51.33516711066627, 8.215192912801134",
+  "49.621774797572265, 7.335841229962489",
+  "47.81567997120982, 12.205747810763095",
+  "53.54477824736183, 13.294211782236403",
+  "51.32847764801089, 12.387475310949721"
+)
+
+df_khv_na_coord_import_na$coordinates <- coordinates
+
+df_khv_na_coord_import_na <- df_khv_na_coord_import_na %>%
+  dplyr::mutate(
+    latitude_coord = as.numeric(sub(",.*", "", coordinates)),
+    longitude_coord = as.numeric(sub(".*,", "", coordinates))
+  )
+
+```
+
+```{r}
+# Reintegrate manually patched coordinates into full fallback table
+df_khv_na_coord_import_geocoded <- df_khv_na_coord_import %>%
+  dplyr::left_join(df_khv_na_coord_import_na, by = "Adresse") %>%
+  dplyr::mutate(
+    latitude = dplyr::coalesce(latitude, latitude_ungefähr.x, latitude_coord),
+    longitude = dplyr::coalesce(longitude, longitude_ungefähr.x, longitude_coord)
+  ) %>%
+  dplyr::select(-Name.x, -latitude.x, -longitude.x, -year.x,
+                -latitude_ungefähr.x, -longitude_ungefähr.x,
+                -latitude_coord, -longitude_coord, -year)
+```
+
+```{r}
+# Final clean version of all geocoded addresses for use in merging with yearly datasets
+khv_unique_addresses_geocoded_complete <- khv_unique_addresses_geocoded_import %>%
+  dplyr::left_join(df_khv_na_coord_import_geocoded, by = "Adresse") %>%
+  dplyr::mutate(
+    latitude = dplyr::coalesce(latitude, latitude_ungefähr.x, latitude_coord),
+    longitude = dplyr::coalesce(longitude, longitude_ungefähr.x, longitude_coord)
+  ) %>%
+  dplyr::select(Adresse, latitude, longitude, Ungefähre_Adresse.x, coordinates)
+```
+
+```{r}
+# Merge completed coordinates into final per-year slim dataframes
+df_khv_2008_slim_geocoded <- df_khv_2008_slim %>%
+  dplyr::left_join(khv_unique_addresses_geocoded_complete, by = "Adresse")
+df_khv_2009_slim_geocoded <- df_khv_2009_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2010_slim_geocoded <- df_khv_2010_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2011_slim_geocoded <- df_khv_2011_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2012_slim_geocoded <- df_khv_2012_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2013_slim_geocoded <- df_khv_2013_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2014_slim_geocoded <- df_khv_2014_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2015_slim_geocoded <- df_khv_2015_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2016_slim_geocoded <- df_khv_2016_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2018_slim_geocoded <- df_khv_2018_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2019_slim_geocoded <- df_khv_2019_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2020_slim_geocoded <- df_khv_2020_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2021_slim_geocoded <- df_khv_2021_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2022_slim_geocoded <- df_khv_2022_slim %>%
+  dplyr::left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+```
+
+```{r}
+# Final attempt to geocode any missing coordinates in 2022 data
+df_khv_2022_slim_geocoded_na <- df_khv_2022_slim_geocoded %>%
+  dplyr::filter(is.na(latitude))
+
+df_khv_2022_slim_geocoded_retry <- df_khv_2022_slim_geocoded_na %>%
+  tidygeocoder::geocode(Adresse, method = 'osm', lat = latitude, long = longitude)
+```
+
+```{r}
+# Manually add fallback coordinates for remaining unresolved 2022 addresses
+new_coordinates <- c(
+    "49.37735600087202, 10.200192912486804", #1
+  "50.77278557165554, 6.2294263107164", #2
+  "51.77241174959895, 10.791016397275904", #3
+  "50.871411211716875, 6.867342928835008", #4
+  "50.937158098825655, 11.288091097230312", #5
+  "51.774988710357995, 6.139348253100987", #6
+  "50.822071882614416, 6.986239512564164", # 7
+  "50.815262117071114, 6.48509019023977", #8
+  "50.79589292706086, 6.233821568387719", #9
+  "51.47240050600508, 7.012219339589449", #10
+  "51.43443426025856, 6.98844321075239", #11
+  "51.44029160899135, 6.969373168422707", #12
+  "51.45775879390183, 8.856834670723734", #13
+  "52.214932198413784, 11.729225326135259", #14
+  "55.01380017546306, 8.423562057670015", #15
+  "51.43102646075685, 7.005378654927263", #16
+  "51.46506882761971, 8.843778139589052", #17
+  "51.94911050314899, 13.787651026120619" #18
+  )
+
+df_khv_2022_patch <- df_khv_2022_slim_geocoded_retry %>%
+  dplyr::filter(is.na(latitude...13)) %>%
+  dplyr::arrange(Name) %>%
+  dplyr::mutate(coordinates = new_coordinates) %>%
+  dplyr::mutate(
+    latitude_coord = as.numeric(sub(",.*", "", coordinates)),
+    longitude_coord = as.numeric(sub(".*,", "", coordinates))
+  )
+
+```
+
+```{r}
+# Merge patch into geocoded retry results
+df_khv_2022_complete_coords <- df_khv_2022_slim_geocoded_retry %>%
+  dplyr::left_join(df_khv_2022_patch, by = "Adresse") %>%
+  dplyr::mutate(
+    latitude = dplyr::coalesce(latitude...13, latitude_coord),
+    longitude = dplyr::coalesce(longitude...14, longitude_coord)
+  ) %>%
+  dplyr::select(Adresse, latitude, longitude) %>%
+  dplyr::group_by(Adresse) %>%
+  dplyr::slice(1) %>%
+  dplyr::ungroup()
+```
+
+```{r}
+# Update the final 2022 dataset with all available coordinates
+df_khv_2022_slim_geocoded <- df_khv_2022_slim_geocoded %>%
+  dplyr::left_join(df_khv_2022_complete_coords, by = "Adresse") %>%
+  dplyr::mutate(
+    latitude = dplyr::coalesce(latitude.x, latitude.y),
+    longitude = dplyr::coalesce(longitude.x, longitude.y)
+  ) %>%
+  dplyr::select(-latitude.x, -latitude.y, -longitude.x, -longitude.y)
+
+```
+
+```{r}
+# Define output directory for processed khv_data
+fs::dir_create(here::here("data", "processed", "khv_data"))
+
+# Export all final per-year geocoded datasets to CSV
+for (year in all_years_KHV) {
+  df_name <- paste0("df_khv_", year, "_slim_geocoded")
+  df <- get(df_name)
+  file_path <- here::here("data", "processed", "khv_data", paste0(df_name, ".csv"))
+  readr::write_csv(df, file_path)
+}
+```
 
