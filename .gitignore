@@ -1,4 +1,12 @@
-### AL ###
+
+# ============================
+# DATA: Exclude large local files
+# ============================
+
+# Raw data (never tracked)
+data/raw/
+
+
 #Template for AL projects for Dynamics 365 Business Central
 #launch.json folder
 .vscode/
@@ -20,3 +28,4 @@ rad.json
 *.flf
 #Test results file
 TestResults.xml
+.Rproj.user

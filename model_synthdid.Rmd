@@ -1,0 +1,3692 @@
+```{r import packages}
+library(httr)
+library(readr)
+library(dplyr)
+library(tidyr)
+library(GGally)
+library(purrr)
+library(zoo)
+```
+
+# Bring together data on local districts and hospital closures
+follows after model_basic_PCA
+
+```{r uses dataframe on local data from model_basic_PCA for combined dataframe non-hospital}
+df_WK_kommunen_DV <- df_WK_kommunen_employment_wide %>%
+  dplyr::select(
+    "Kommune",
+    "GKZ",
+    "ARS",
+    "Bundesland",
+    "Landkreis",
+    "Demografietyp",
+    "Year",
+    "Beschäftigungsquote (%)",
+    "Frauenbeschäftigungsquote (%)"
+  )
+
+# List of dataframes to merge
+dfs_wk <- list(
+  df_WK_kommunen_demographics_wide,
+  df_WK_kommunen_DV,
+  df_WK_kommunen_finance_wide#,
+#  df_WK_kommunen_social_wide
+#  df_WK_kommunen_training_wide
+)
+
+# Merge dataframes iteratively using `reduce` and `full_join`
+df_wk_combined <- reduce(dfs_wk, function(x, y) {
+  full_join(x, y, by = c("Kommune", "GKZ", "ARS", "Bundesland", "Landkreis", "Demografietyp", "Year"))
+}) %>%
+  rename(ARS_original = ARS) %>% # Rename "ARS" to "ARS_original"
+  mutate(
+    ARS = substr(ARS_original, 1, 9) # Extract the first 9 digits
+  ) %>%  
+  dplyr::select(
+    - 'Hebesatz Grundsteuer B (v.H.)',
+    - 'Hebesatz Gewerbesteuer (v.H.)',
+    - 'Jugendhilfe (Euro je Einwohner:in)',
+    - 'Investitionskredite % zum Vorjahr (%)',
+    - 'Liquiditätskredite % zum Vorjahr (%)',
+    - 'Steuereinnahmen pro Einwohner:in (Euro je Einwohner:in)',
+    - 'Bevölkerungsentwicklung seit 2011 (%)',
+    - 'Bevölkerungsentwicklung über die letzten 5 Jahre (%)',
+    - 'Vorzeitige Sterblichkeit - Frauen (Todesfälle je 1.000 Einwohner:innen)',
+    - 'Vorzeitige Sterblichkeit - Männer (Todesfälle je 1.000 Einwohner:innen)',
+    - 'Zuzüge (je 1.000 Einwohner:innen)',
+    - 'Fortzüge (je 1.000 Einwohner:innen)',
+    - 'Wanderungssaldo (je 1.000 Einwohner:innen)',
+    - 'Familienwanderung (je 1.000 Einwohner:innen)',
+    - 'Bildungswanderung (je 1.000 Einwohner:innen)',
+    - 'Wanderung zu Beginn der 2. Lebenshälfte (je 1.000 Einwohner:innen)',
+    - 'Alterswanderung (je 1.000 Einwohner:innen)'#,
+#    - 'Haushalte mit niedrigem Einkommen (%)',
+#    - 'Haushalte mit mittlerem Einkommen (%)',
+#    - 'Haushalte mit hohem Einkommen (%)',
+#    - 'Arbeitslose an den SvB (%)',
+#    - 'Arbeitslose an den ausländischen SvB (%)',
+#    - 'Kinderarmut (%)',
+#    - 'Jugendarmut (%)',
+#    - 'Altersarmut (%)',
+#    - 'Breitbandversorgung - Private Haushalte (%)'
+  )  %>%
+  rename(employment_level = "Beschäftigungsquote (%)") %>%
+  rename(employment_level_female = "Frauenbeschäftigungsquote (%)") %>%
+  rename(population_total = "Bevölkerung (Anzahl)") %>%
+  filter(
+    Year != 2021 & Year != 2022
+  )
+
+# Filter to retain only rows without any NA values
+df_wk_combined_no_na <- df_wk_combined %>%
+  filter(complete.cases(.))
+
+df_wk_combined_no_na_employment_level_female <- df_wk_combined %>%
+  group_by(ARS) %>%
+  mutate(
+    employment_level_female = na.approx(employment_level_female, na.rm = FALSE)
+  ) %>%
+  filter(
+    all(2006:2020 %in% Year) &  # Ensure all years from 2006 to 2020 are present
+    !any(is.na(employment_level_female))  # Ensure no NA in employment_level_female
+  ) %>%
+  mutate(
+    employment_level = na.approx(employment_level, na.rm = FALSE)
+  ) %>%
+  filter(
+    all(2006:2020 %in% Year) &  # Ensure all years from 2006 to 2020 are present
+    !any(is.na(employment_level))  # Ensure no NA in employment_level_female
+  ) %>%
+  ungroup()
+
+head(df_wk_combined, 20)
+```
+
+```{r}
+# Identify columns with NA values
+columns_with_na <- colnames(df_wk_combined_filled)[
+  colSums(is.na(df_wk_combined_filled)) > 0
+]
+
+# Inspect the columns with NA values
+df_with_na <- df_wk_combined_filled %>%
+  dplyr::select(all_of(columns_with_na))
+
+# View a summary of NA counts in those columns
+na_summary <- colSums(is.na(df_with_na))
+na_summary
+
+# Display rows with NA in the selected columns
+rows_with_na <- df_with_na %>%
+  filter(if_any(everything(), is.na))  # Select rows with NA in any column
+rows_with_na
+```
+
+```{r}
+library(dplyr)
+library(zoo)
+
+# Interpolate NA values within each group
+df_wk_combined_filled <- df_wk_combined %>%
+  group_by(ARS) %>%
+  mutate(
+    employment_level_female = na.approx(employment_level_female, na.rm = FALSE)
+  ) %>%
+  ungroup()
+
+```
+
+
+```{r combines prior dataframe of local data with hospital closure dataframe}
+df_hospital_closures_newspaper_confirmed_ARS_staff <- df_hospital_closures_newspaper_confirmed_ARS %>%
+  unique()%>%
+  left_join(
+    df_hospital_closures_staff_geocoded %>% 
+    dplyr::select(IK_Institutionskennzeichen, staff_doctors_nurses_numeric, year), 
+    by = c("IK_Institutionskennzeichen", "year"),
+    multiple = "any"
+  )
+
+# Perform a left join to enrich df_wk_combined_no_na
+df_wk_hospital_closures_combined <- df_wk_combined_no_na_employment_level_female %>%
+  left_join(
+    df_hospital_closures_newspaper_confirmed_ARS_staff %>%
+      dplyr::select(ARS, closure_context_info, year_of_closure, staff_doctors_nurses_numeric), # Select relevant columns
+    by = "ARS", # Match based on ARS
+    multiple = "first"
+  ) %>%
+  # Rename the columns for consistency
+  rename(
+    confirmed_closure = closure_context_info,
+    year_of_closure = year_of_closure
+  ) %>%
+  # Convert data types for comparison
+  mutate(
+    Year = as.numeric(Year), # Convert Year from character to numeric
+    year_of_closure = as.numeric(as.character(year_of_closure)) # Convert year_of_closure from factor to numeric
+  ) %>%
+# Create treated_unit and treatment_received columns
+  mutate(
+    # treated_unit: TRUE if year_of_closure is not NA, FALSE otherwise
+    treated_unit = !is.na(year_of_closure),
+    # treatment_received: TRUE if Year >= year_of_closure, FALSE otherwise
+    treatment_received = ifelse(!is.na(year_of_closure) & Year >= year_of_closure, TRUE, FALSE)
+  ) %>%
+  mutate(
+    sub_treated_group = ifelse(!is.na(year_of_closure), as.character(year_of_closure), "Untreated")
+  ) %>%
+  unique() %>%
+  mutate(
+    year_relative_to_treatment = ifelse(
+      is.na(year_of_closure), 
+      NA,  # Assign NA for untreated units
+      Year - year_of_closure  # Calculate relative year for treated units
+    )
+  )
+
+
+head(df_wk_hospital_closures_combined)
+```
+
+
+# Parallel Trends Assumption, Visual Test
+
+```{r}
+df_wk_hospital_closures_combined_13_17 <- df_wk_hospital_closures_combined  %>%
+  filter(sub_treated_group %in% c(2013, 2014, 2015, 2016, 2017) | sub_treated_group == "Untreated")
+
+df_wk_hospital_closures_combined_13_17_mean <- df_wk_hospital_closures_combined_13_17 %>%
+  group_by(Year, sub_treated_group) %>%
+  summarise(
+    mean_employment = mean(employment_level, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot parallel trends overall comparison treated vs. untreated
+ggplot(df_wk_hospital_closures_combined, aes(x = Year, y = employment_level, color = factor(treated_unit), group = treated_unit)) +
+  stat_summary(fun = mean, geom = "line", linewidth = 1) +
+  labs(
+    title = "Parallel Trends Assumption Check",
+    x = "Year",
+    y = "Employment Rate (%)",
+    color = "Treatment Received"
+  ) +
+  theme_minimal()
+
+# plot one graph with year by year comparison
+ggplot(df_wk_hospital_closures_combined_13_17_mean, aes(x = Year, y = mean_employment, color = sub_treated_group, group = sub_treated_group)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Employment Trends by Treatment Year",
+    x = "Year",
+    y = "Mean Employment Rate (%)",
+    color = "Year of Closure"
+  ) +
+  theme_minimal()
+
+# plot facet for each year
+ggplot(df_wk_hospital_closures_combined_13_17_mean, aes(x = Year, y = mean_employment, color = sub_treated_group, group = sub_treated_group)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ sub_treated_group) +
+  labs(
+    title = "Employment Trends by Year of Closure",
+    x = "Year",
+    y = "Mean Employment Rate (%)",
+    color = "Group",
+    caption = "Each facet represents a treated group's year of closure. Untreated units are included for comparison."
+  ) +
+  theme_minimal()
+```
+
+# Running DiD Models
+## Basic DiD
+```{r}
+did_model_basic <- lm(
+  employment_level_female ~ treated_unit + treatment_received,
+  data = df_wk_hospital_closures_combined
+)
+
+summary(did_model_basic)
+```
+Treated units have a lower baseline employment level for females, independent of treatment status. Treatment itself has a positive and significant effect on female employment levels during the periods it is implemented. However, visual inspection already shows a general  upwards trend over time - treatment happens in years 2013-2017, with already higher levels of employment. We need to take these higher levels into account by accounting for time effects in the equation.
+
+## DiD with Time Trends
+```{r}
+# DiD model with Year
+did_model_time <- lm(
+  employment_level_female ~ treated_unit + treatment_received + factor(Year),
+  data = df_wk_hospital_closures_combined
+)
+
+# View summary of results
+summary(did_model_time)
+```
+
+Treated units (even before treatment) have significantly lower female employment levels compared to untreated units. Employment levels for females have increased consistently over time, as shown by the positive and statistically significant year coefficients.
+After controlling for year effects, treatment (e.g., hospital closure) leads to a significant negative effect on female employment levels.
+
+##DiD Fixed Effects Time
+```{r}
+library(plm)
+df_no_duplicates <- df_wk_hospital_closures_combined %>%
+  group_by(ARS_original, Year) %>%
+  slice(1) %>%  # Select only the first row for duplicates
+  ungroup()
+
+# Convert to panel data format
+df_panel <- pdata.frame(df_no_duplicates, index = c("ARS_original", "Year"))
+
+# Run fixed-effects model
+did_model_fe <- plm(
+  employment_level_female ~ treatment_received + factor(Year),
+  data = df_panel,
+  model = "within"
+)
+
+summary(did_model_fe)
+```
+
+```{r}
+results_by_demographic <- df_panel %>%
+  group_by(Demografietyp) %>%
+  do(model = plm(
+    employment_level_female ~ 
+      treatment_received + 
+      factor(Year),
+    data = .,
+    model = "within"
+  ))
+
+# Loop through all models and print summaries
+for (i in 1:nrow(results_by_demographic)) {
+  cat("Summary for Demographic Type:", results_by_demographic$Demografietyp[i], "\n")
+  print(summary(results_by_demographic$model[[i]]))
+}
+
+
+```
+
+##Event Study Design
+```{r}
+library(fixest)
+
+df_wk_hospital_closures_combined_14 <- df_wk_hospital_closures_combined %>%
+  filter(
+    sub_treated_group == 2014 | sub_treated_group == "Untreated"
+  )
+
+df_wk_hospital_closures_combined_15 <- df_wk_hospital_closures_combined %>%
+  filter(
+    sub_treated_group == 2015 | sub_treated_group == "Untreated"
+  )
+
+event_study <- feols(
+  employment_level_female ~ i(Year, treatment_received, ref = 2014) + factor(ARS_original) + factor(Year),
+  data = df_wk_hospital_closures_combined
+)
+
+event_study_2014 <- feols(
+  employment_level_female ~ i(Year, treatment_received, ref = 2014) + factor(ARS_original) + factor(Year),
+  data = df_wk_hospital_closures_combined_14
+)
+
+event_study_2015 <- feols(
+  employment_level_female ~ i(Year, treatment_received, ref = 2015) + factor(ARS_original) + factor(Year),
+  data = df_wk_hospital_closures_combined_15
+)
+
+
+summary(event_study)
+summary(event_study_2014)
+summary(event_study_2015)
+```
+
+```{r}
+# Extract the coefficients for the interaction terms
+event_coeff <- coef(event_study_2014)[grep("Year::.*:treatment_received", names(coef(event_study_2014)))]
+
+# Extract confidence intervals for the same terms
+conf_int <- confint(event_study_2014)[grep("Year::.*:treatment_received", rownames(confint(event_study_2014))), ]
+
+# Prepare the data for plotting
+event_data <- data.frame(
+  year_relative = as.numeric(gsub("Year::", "", gsub(":treatment_received", "", names(event_coeff)))),
+  estimate = event_coeff,
+  lower = conf_int[, 1],
+  upper = conf_int[, 2]
+)
+
+library(ggplot2)
+
+ggplot(event_data, aes(x = year_relative, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_errorbar(aes(ymin = lower, ymax = upper), width = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Event Study: Effect of Treatment on Employment Level",
+    x = "Years Relative to Treatment (2014 = Year of Treatment)",
+    y = "Estimated Effect on Employment Level (with 95% CI)"
+  ) +
+    scale_x_continuous(
+    breaks = seq(min(event_data$year_relative), max(event_data$year_relative), by = 1),
+    labels = seq(min(event_data$year_relative), max(event_data$year_relative), by = 1)
+  ) +
+  theme_minimal()
+
+```
+
+##SynthDiD
+First duplicates in dataset need to be identified for combinations of ARS_original and Year, which causes pivot_wider() to output list-columns instead of clean numeric matrices. These duplicates need to be resolved for the synthetic control method, as it requires unique values for each combination of unit and time period.
+#### Preparing data
+##### Preparing data for synth did on one treatment year
+```{r preparing data }
+df_wk_hospital_closures_combined %>%
+  dplyr::summarise(n = dplyr::n(), .by = c(ARS_original, Year)) %>%
+  dplyr::filter(n > 1L)
+
+#middle_year <- 2015  # Define middle year for controls
+
+df_wk_hospital_closures_combined_synthdid <- df_wk_hospital_closures_combined %>%
+  mutate(Year_index = Year - min(Year) + 1)
+
+df_wk_hospital_closures_combined_synthdid <- df_wk_hospital_closures_combined_synthdid %>%
+  group_by(ARS_original) %>%
+  mutate(
+    first_treatment_year = ifelse(any(treatment_received == 1), min(Year[treatment_received == 1], na.rm = TRUE), NA),
+    year_relative_to_treatment = Year - first_treatment_year,  # Treatment year = 0 for treated units
+      year_relative_to_treatment = ifelse(treatment_received == 0, Year - middle_year, year_relative_to_treatment)
+    ) %>%
+  ungroup()
+
+
+df_wk_hospital_closures_combined_synthdid <- df_wk_hospital_closures_combined_synthdid %>%
+  filter(sub_treated_group %in% c(2014) | sub_treated_group == "Untreated") %>%
+  group_by(ARS_original, Year_index) %>%
+  summarise(
+    employment_level_female = mean(employment_level_female, na.rm = TRUE),
+#    employment_level_female_deviation = mean(employment_level_female_deviation, na.rm = TRUE),
+    treatment_received = max(treatment_received, na.rm = TRUE), # Use max to ensure treatment is captured
+    .groups = "drop"
+  ) 
+
+
+df_wk_hospital_closures_combined_synthdid %>%
+  dplyr::summarise(n = dplyr::n(), .by = c(ARS_original, Year_index)) %>%
+  dplyr::filter(n > 1L)
+```
+##### Preparing data for synth did on several years
+
+```{r}
+library(dplyr)
+
+middle_year <- 2015  # Define middle year for control units
+
+# Step 1: Create year_relative_to_treatment and compute employment level deviation
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined %>%
+  mutate(
+    ARS_original = as.numeric(ARS_original)
+  ) %>%
+  left_join(
+    df_wk_hospital_closures_combined_CS %>%
+      dplyr::select(ARS_original, Year, population_density, income_tax_per_capita, core_budget_debt_per_capita), 
+    by = c("ARS_original", "Year")
+  )
+
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  # Compute Year Index (Optional)
+  mutate(Year_index = Year - min(Year) + 1) %>%
+  
+  # Compute Employment Level Deviation from Annual Average
+  group_by(Year) %>%
+  mutate(
+    employment_level_female_deviation = employment_level_female - mean(employment_level_female, na.rm = TRUE),
+    core_budget_debt_per_capita_deviation = core_budget_debt_per_capita - mean(core_budget_debt_per_capita, na.rm = TRUE),
+    income_tax_per_capita_deviation = income_tax_per_capita - mean(income_tax_per_capita, na.rm = TRUE)
+    ) %>%
+  ungroup() %>%
+  
+  # Assign year_relative_to_treatment: Different for treated & control units
+  group_by(ARS_original) %>%
+  mutate(
+    first_treatment_year = ifelse(any(treatment_received == 1), min(Year[treatment_received == 1], na.rm = TRUE), NA),
+    year_relative_to_treatment = ifelse(treatment_received == 1, Year - first_treatment_year, Year - middle_year)  # Use correct reference
+  ) %>%
+  ungroup()
+
+
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  # Filter Treated and Control Groups
+  filter(sub_treated_group %in% c(2014, 2015, 2016, 2017) | sub_treated_group == "Untreated") %>%
+
+  # Aggregate Data by Unit & Event Time 
+  group_by(ARS_original, year_relative_to_treatment, sub_treated_group) %>%
+  summarise(
+    employment_level_female = mean(employment_level_female, na.rm = TRUE),
+    employment_level_female_deviation = mean(employment_level_female_deviation, na.rm = TRUE),
+    population_density = mean(population_density, na.rm = TRUE),
+    income_tax_per_capita = mean(income_tax_per_capita, na.rm = TRUE),
+    income_tax_per_capita_deviation = mean(income_tax_per_capita_deviation, na.rm = TRUE),
+    core_budget_debt_per_capita = mean(core_budget_debt_per_capita, na.rm = TRUE),
+    core_budget_debt_per_capita_deviation = mean(core_budget_debt_per_capita_deviation, na.rm = TRUE),
+    treatment_received = max(treatment_received, na.rm = TRUE),  # Ensure treatment is captured
+    .groups = "drop"
+  )
+
+# Step 2: Find the range of `year_relative_to_treatment` that all units must have
+valid_range <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  group_by(ARS_original) %>%
+  summarise(
+    min_year = min(year_relative_to_treatment),
+    max_year = max(year_relative_to_treatment),
+    count_years = n()
+  ) %>%
+  ungroup() %>%
+  summarise(
+    highest_min = max(min_year),  # Highest minimum year
+    lowest_max = min(max_year)    # Lowest maximum year
+  )
+
+# Step 3: Filter out any rows outside of the valid range
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(
+    year_relative_to_treatment >= valid_range$highest_min &
+    year_relative_to_treatment <= valid_range$lowest_max
+  )
+
+# Step 4: Remove units that are missing observations for any required years
+complete_units <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  group_by(ARS_original) %>%
+  summarise(count_years = n_distinct(year_relative_to_treatment)) %>%
+  filter(count_years == (valid_range$lowest_max - valid_range$highest_min + 1)) %>%
+  pull(ARS_original)
+
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(ARS_original %in% complete_units) %>%
+  group_by(ARS_original) %>%
+  fill(population_density, .direction = "downup") %>%
+  ungroup()
+
+# Step 5: Verify the Result
+df_wk_hospital_closures_combined_synthdid_2 %>%
+  summarise(n = n(), .by = c(ARS_original, year_relative_to_treatment)) %>%
+  filter(n > 1L)  # Should return an empty dataset if no duplicates exist
+
+
+colSums(is.na(df_wk_hospital_closures_combined_synthdid_2))  # Should return all 0s
+
+```
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(MatchIt)
+
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  group_by(ARS_original) %>%
+  mutate(
+    treated_unit = ifelse(any(treatment_received == 1, na.rm = TRUE), 1, 0)  # 1 if treated at any point, else 0
+  ) %>%
+  ungroup()
+
+df_unit_averages <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(year_relative_to_treatment < 0) %>%
+  group_by(ARS_original) %>%
+  summarise(
+    avg_employment_level_female_deviation = mean(employment_level_female_deviation, na.rm = TRUE),
+    avg_income_tax_per_capita_deviation = mean(income_tax_per_capita_deviation, na.rm = TRUE),
+    avg_core_budget_debt_per_capita_deviation = mean(core_budget_debt_per_capita_deviation, na.rm = TRUE),
+    avg_population_density = mean(population_density, na.rm = TRUE),
+    treated_unit = mean(treated_unit, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+match_model_trajectory_average <- matchit(
+  treated_unit ~ 
+    avg_employment_level_female_deviation +
+    avg_income_tax_per_capita_deviation +
+    avg_core_budget_debt_per_capita_deviation + 
+    avg_population_density, 
+  data = df_unit_averages,
+  method = "nearest",  # Optimal matching instead of nearest
+  ratio = 50
+)
+
+df_matched_trajectory_average <- match.data(match_model_trajectory_average)
+```
+
+```{r}
+library(cobalt)
+
+bal.tab(match_model_trajectory_average)
+love.plot(match_model_trajectory_average, threshold = 0.1)
+
+```
+
+```{r}
+# instead of running on random sample of units as above in the basic version, matching could be implemented
+library(tidyr)
+library(dplyr)
+library(MatchIt)
+
+df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  group_by(ARS_original) %>%
+  mutate(
+    treated_unit = ifelse(any(treatment_received == 1, na.rm = TRUE), 1, 0)  # 1 if treated at any point, else 0
+  ) %>%
+  ungroup()
+
+# Step 1: Convert employment deviation to wide format
+df_pre_treatment_wide <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(year_relative_to_treatment < 0) %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, employment_level_female_deviation) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = employment_level_female_deviation, names_prefix = "t_")
+
+# Step 2: Convert time-varying covariates into wide format
+df_covariates_wide <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(year_relative_to_treatment < 0) %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, population_density, income_tax_per_capita_deviation, core_budget_debt_per_capita_deviation) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = c(population_density, income_tax_per_capita_deviation, core_budget_debt_per_capita_deviation), 
+              names_glue = "{.value}_t{year_relative_to_treatment}")  # Ensure unique names
+
+df_matching_data <- df_pre_treatment_wide %>%
+  left_join(df_covariates_wide, by = "ARS_original") %>%
+  left_join(df_wk_hospital_closures_combined_synthdid_2 %>%
+              dplyr::select(ARS_original, treated_unit) %>% 
+              distinct(), 
+            by = "ARS_original") %>%
+  rename_with(~ gsub("-", "", .x))
+
+match_model_trajectory <- matchit(
+  treated_unit ~ 
+    t_9 + t_8 + t_7 + t_6 + t_5 + t_4 + t_3 + t_2 + t_1 +
+    population_density_t9 + population_density_t8 + population_density_t7 + population_density_t6 + 
+    population_density_t5 + population_density_t4 + population_density_t3 + population_density_t2 + population_density_t1 +
+    income_tax_per_capita_deviation_t9 + income_tax_per_capita_deviation_t8 + income_tax_per_capita_deviation_t7 + 
+    income_tax_per_capita_deviation_t6 + income_tax_per_capita_deviation_t5 + income_tax_per_capita_deviation_t4 +
+    income_tax_per_capita_deviation_t3 + income_tax_per_capita_deviation_t2 + income_tax_per_capita_deviation_t1 +
+    core_budget_debt_per_capita_deviation_t9 + core_budget_debt_per_capita_deviation_t8 + core_budget_debt_per_capita_deviation_t7 + 
+    core_budget_debt_per_capita_deviation_t6 + core_budget_debt_per_capita_deviation_t5 + core_budget_debt_per_capita_deviation_t4 +
+    core_budget_debt_per_capita_deviation_t3 + core_budget_debt_per_capita_deviation_t2 + core_budget_debt_per_capita_deviation_t1,
+  data = df_matching_data,
+  method = "nearest", #optimal nearest
+#  distance = "mahalanobis",  # Use Mahalanobis distance instead of propensity scores
+  ratio = 50  # controls per treated unit
+)
+
+df_matched_trajectory <- match.data(match_model_trajectory)
+```
+
+```{r}
+df_matching_data %>%
+  group_by(treated_unit) %>%
+  summarise(across(everything(), mean, na.rm = TRUE))
+
+```
+
+
+
+```{r}
+library(cobalt)
+
+bal.tab(match_model_trajectory)
+love.plot(match_model_trajectory, threshold = 0.1)
+
+```
+
+
+
+```{r}
+set.seed(42)  # Ensures reproducibility
+
+# Step 1: Identify Treated Units (Keep All)
+treated_units <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(treatment_received == 1) %>%
+  distinct(ARS_original)
+
+# Step 2: Identify Unique Control Units (Candidates for Selection)
+control_units <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  filter(treatment_received == 0) %>%
+  distinct(ARS_original)
+
+# Step 3: Randomly Select 100 Unique Control Units
+selected_control_units <- control_units %>%
+  sample_n(size = 1000, replace = FALSE)
+
+# Step 4: Combine Treated Units with Selected Control Units
+selected_units <- bind_rows(treated_units, selected_control_units)
+
+# # Step 5: Filter the Original Dataset to Retain Only These Selected Units
+# df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+#   filter(ARS_original %in% selected_units$ARS_original)
+
+# # Step 6: Compute the highest minimum and lowest maximum year_relative_to_treatment across all units
+# year_range <- df_wk_hospital_closures_combined_synthdid_2 %>%
+#   group_by(ARS_original) %>%
+#   summarise(
+#     min_year_relative_to_treatment = min(year_relative_to_treatment, na.rm = TRUE),
+#     max_year_relative_to_treatment = max(year_relative_to_treatment, na.rm = TRUE)
+#   ) %>%
+#   summarise(
+#     highest_min = max(min_year_relative_to_treatment),  # Highest minimum
+#     lowest_max = min(max_year_relative_to_treatment)    # Lowest maximum
+#   )
+# 
+# # Step 7: Filter dataset to keep only years within this common range
+# df_wk_hospital_closures_combined_synthdid_2 <- df_wk_hospital_closures_combined_synthdid_2 %>%
+#   filter(year_relative_to_treatment >= year_range$highest_min & 
+#          year_relative_to_treatment <= year_range$lowest_max)
+
+
+df_wk_hospital_closures_combined_synthdid_2 %>%
+  dplyr::summarise(n = dplyr::n(), .by = c(ARS_original, year_relative_to_treatment)) %>%
+  dplyr::filter(n > 1L)
+
+colSums(is.na(df_wk_hospital_closures_combined_synthdid_2))
+
+```
+
+#### Running synth did on one year
+
+```{r running synth did on one year}
+# Prepare the outcome matrix (Y)
+synthdid_Y <- df_wk_hospital_closures_combined_synthdid %>%
+  dplyr::select(ARS_original, Year_index, employment_level_female) %>%
+  pivot_wider(names_from = Year_index, values_from = employment_level_female) %>%
+  dplyr::select(-ARS_original) %>%
+  as.matrix()
+synthdid_Y <- synthdid_Y[1:500, ]
+
+# Prepare the treatment matrix
+synthdid_treatment_matrix <- df_wk_hospital_closures_combined_synthdid %>%
+  dplyr::select(ARS_original, Year_index, treatment_received) %>%
+  pivot_wider(names_from = Year_index, values_from = treatment_received) %>%
+  dplyr::select(-ARS_original) %>%
+  replace(is.na(.), 0) %>% # Replace NA with 0
+  as.matrix()
+synthdid_treatment_matrix <- synthdid_treatment_matrix[1:500, ]
+
+synthdid_Y <- matrix(as.numeric(synthdid_Y), nrow = nrow(synthdid_Y), ncol = ncol(synthdid_Y))
+synthdid_treatment_matrix <- matrix(as.numeric(synthdid_treatment_matrix), nrow = nrow(synthdid_treatment_matrix), ncol = ncol(synthdid_treatment_matrix))
+
+
+# Define the number of untreated units and pre-treatment periods
+synthdid_N0 <- sum(rowSums(synthdid_treatment_matrix) == 0)
+synthdid_T0 <- which(colSums(synthdid_treatment_matrix) > 0)[1] - 1
+
+library(synthdid)
+
+synthdid_estimate <- synthdid::synthdid_estimate(
+    Y = synthdid_Y,
+    # treated = synthdid_treatment_matrix,
+    N0 = synthdid_N0,
+    T0 = synthdid_T0
+)
+
+# Summarize the results
+summary_synthdid_estimate <- summary(synthdid_estimate)
+```
+
+```{r}
+summary_synthdid_estimate
+synthdid::synthdid_plot(synthdid_estimate)
+```
+
+#### Running synth did on several years
+```{r}
+# Prepare the outcome matrix (Y)
+synthdid_Y <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, employment_level_female_deviation) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = employment_level_female_deviation) %>%
+  dplyr::select(-ARS_original) %>%
+  as.matrix()
+#synthdid_Y <- synthdid_Y[1:500, ]
+
+# Prepare the treatment matrix
+synthdid_treatment_matrix <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, treatment_received) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = treatment_received) %>%
+  dplyr::select(-ARS_original) %>%
+  replace(is.na(.), 0) %>% # Replace NA with 0
+  as.matrix()
+#synthdid_treatment_matrix <- synthdid_treatment_matrix[1:500, ]
+
+synthdid_Y <- matrix(as.numeric(synthdid_Y), nrow = nrow(synthdid_Y), ncol = ncol(synthdid_Y))
+synthdid_treatment_matrix <- matrix(as.numeric(synthdid_treatment_matrix), nrow = nrow(synthdid_treatment_matrix), ncol = ncol(synthdid_treatment_matrix))
+
+
+# Define the number of untreated units and pre-treatment periods
+synthdid_N0 <- sum(rowSums(synthdid_treatment_matrix) == 0)
+synthdid_T0 <- which(colSums(synthdid_treatment_matrix) > 0)[1] - 1
+
+library(synthdid)
+
+synthdid_estimate <- synthdid::synthdid_estimate(
+    Y = synthdid_Y,
+    # treated = synthdid_treatment_matrix,
+    N0 = synthdid_N0,
+    T0 = synthdid_T0,
+    weights = list(lambda = rep(0.5, synthdid_T0_average) + 0.5)  # Forces more even weighting across years
+)
+
+# Summarize the results
+summary_synthdid_estimate <- summary(synthdid_estimate)
+```
+
+
+##### Assessing performance
+```{r}
+summary_synthdid_estimate
+synthdid::synthdid_plot(synthdid_estimate)
+
+estimate <- summary_synthdid_estimate$estimate
+se <- summary_synthdid_estimate$se[1, 1]  # Extract standard error
+
+conf_interval <- c(
+  estimate - 1.96 * se,  # Lower bound (95% CI)
+  estimate + 1.96 * se   # Upper bound (95% CI)
+)
+
+print(conf_interval)
+
+```
+$estimate
+[1] -0.8328963
+
+$se
+          [,1]
+[1,] 0.4519199
+
+conf_interval: [1] -1.71865938  0.05286679
+
+$dimensions
+          N1           N0 N0.effective           T1           T0 T0.effective 
+      12.000     2488.000      477.990        4.000        9.000        1.026 
+
+Understanding results:
+
+- p-value approximation: ≈1.84; meaning p ≈ 0.066 (Not conventionally significant at the 5% level)
+- T0.effective is only slightly above 1, meaning that the synthetic control is being built using almost no variation from pre-treatment trends.
+-- approach:  matching to remove unstable control units that weaken trend estimation
+- N0 = 2,488 (total controls) vs. N0.effective = 477.99 (effective controls); model is using about 19% of the available control units meaningfully. Many controls may not be contributing usefully but still increase computational noise
+-- approach: matching could help pre-filter control units, keeping only those that contribute meaningfully
+-- approach, subsequent: Increasing zeta.lambda in SynthDID would regularize weights to avoid reliance on too many controls
+
+```{r}
+synthdid::synthdid_plot(synthdid_estimate, overlay = 1)
+```
+
+##### Running synth did on several years (balanced data)
+```{r}
+#extract only the matched units from match_model_trajectory
+df_matched_units <- match.data(match_model_trajectory) %>%
+  dplyr::select(ARS_original, treated_unit) %>%
+  distinct()
+
+df_synthdid_matched <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  inner_join(df_matched_units, by = "ARS_original")
+
+synthdid_Y <- df_synthdid_matched %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, employment_level_female_deviation) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = employment_level_female_deviation) %>%
+  dplyr::select(-ARS_original) %>%
+  as.matrix()
+
+synthdid_treatment_matrix <- df_synthdid_matched %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, treatment_received) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = treatment_received) %>%
+  dplyr::select(-ARS_original) %>%
+  replace(is.na(.), 0) %>%
+  as.matrix()
+
+synthdid_Y <- matrix(as.numeric(synthdid_Y), nrow = nrow(synthdid_Y), ncol = ncol(synthdid_Y))
+synthdid_treatment_matrix <- matrix(as.numeric(synthdid_treatment_matrix), nrow = nrow(synthdid_treatment_matrix), ncol = ncol(synthdid_treatment_matrix))
+
+synthdid_N0 <- sum(rowSums(synthdid_treatment_matrix) == 0)  # Count of control units
+synthdid_T0 <- which(colSums(synthdid_treatment_matrix) > 0)[1] - 1  # Number of pre-treatment periods
+
+library(synthdid)
+
+synthdid_estimate <- synthdid::synthdid_estimate(
+    Y = synthdid_Y,
+    N0 = synthdid_N0,
+    T0 = synthdid_T0
+)
+
+# Summarize the results
+summary_synthdid_estimate <- summary(synthdid_estimate)
+```
+
+```{r}
+summary_synthdid_estimate
+synthdid::synthdid_plot(synthdid_estimate)
+
+estimate <- summary_synthdid_estimate$estimate
+se <- summary_synthdid_estimate$se[1, 1]  # Extract standard error
+
+conf_interval <- c(
+  estimate - 1.96 * se,  # Lower bound (95% CI)
+  estimate + 1.96 * se   # Upper bound (95% CI)
+)
+
+print(conf_interval)
+
+```
+
+##### Running synth did on several years (high-level balanced data)
+
+```{r}
+#extract only the matched units from match_model_trajectory
+df_matched_units_average <- match.data(match_model_trajectory_average) %>%
+  dplyr::select(ARS_original, treated_unit) %>%
+  distinct()
+
+df_synthdid_matched_average <- df_wk_hospital_closures_combined_synthdid_2 %>%
+  inner_join(df_matched_units_average, by = "ARS_original")
+
+synthdid_Y_average <- df_synthdid_matched_average %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, employment_level_female_deviation) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = employment_level_female_deviation) %>%
+  dplyr::select(-ARS_original) %>%
+  as.matrix()
+
+synthdid_treatment_matrix_average <- df_synthdid_matched_average %>%
+  dplyr::select(ARS_original, year_relative_to_treatment, treatment_received) %>%
+  pivot_wider(names_from = year_relative_to_treatment, values_from = treatment_received) %>%
+  dplyr::select(-ARS_original) %>%
+  replace(is.na(.), 0) %>%
+  as.matrix()
+
+synthdid_Y_average <- matrix(as.numeric(synthdid_Y_average), nrow = nrow(synthdid_Y_average), ncol = ncol(synthdid_Y_average))
+synthdid_treatment_matrix_average <- matrix(as.numeric(synthdid_treatment_matrix_average), nrow = nrow(synthdid_treatment_matrix_average), ncol = ncol(synthdid_treatment_matrix_average))
+
+synthdid_N0_average <- sum(rowSums(synthdid_treatment_matrix_average) == 0)  # Count of control units
+synthdid_T0_average <- which(colSums(synthdid_treatment_matrix_average) > 0)[1] - 1  # Number of pre-treatment periods
+
+library(synthdid)
+
+synthdid_estimate_average <- synthdid::synthdid_estimate(
+    Y = synthdid_Y_average,
+    N0 = synthdid_N0_average,
+    T0 = synthdid_T0_average
+)
+
+# Summarize the results
+summary_synthdid_estimate_average <- summary(synthdid_estimate_average)
+```
+
+```{r}
+summary_synthdid_estimate_average
+synthdid::synthdid_plot(synthdid_estimate_average)
+
+estimate_average <- summary_synthdid_estimate_average$estimate
+se_average <- summary_synthdid_estimate_average$se[1, 1]  # Extract standard error
+
+conf_interval_average <- c(
+  estimate_average - 1.96 * se,  # Lower bound (95% CI)
+  estimate_average + 1.96 * se   # Upper bound (95% CI)
+)
+
+print(conf_interval_average)
+
+```
+```{r}
+synthdid_estimate_average_evenly_weighted <- synthdid::synthdid_estimate(
+    Y = synthdid_Y_average,
+    N0 = synthdid_N0_average,
+    T0 = synthdid_T0_average,
+    weights = list(lambda = rep(0.2, synthdid_T0_average) + 0.8)  # Allows some optimization while preventing extreme weighting
+)
+
+summary_synthdid_estimate_average_evenly_weighted <- summary(synthdid_estimate_average_evenly_weighted)
+
+```
+
+```{r}
+summary_synthdid_estimate_average_evenly_weighted
+synthdid::synthdid_plot(synthdid_estimate_average_evenly_weighted)
+
+estimate_average_evenly_weighted <- summary_synthdid_estimate_average_evenly_weighted$estimate
+se_average_evenly_weighted <- summary_synthdid_estimate_average_evenly_weighted$se[1, 1]  # Extract standard error
+
+conf_interval_average_evenly_weighted <- c(
+  estimate_average_evenly_weighted - 1.96 * se,  # Lower bound (95% CI)
+  estimate_average_evenly_weighted + 1.96 * se   # Upper bound (95% CI)
+)
+
+print(conf_interval_average_evenly_weighted)
+```
+
+
+```{r}
+# Check the distribution of values in the column `sub_treated_group`
+df_wk_hospital_closures_combined %>%
+  group_by(sub_treated_group) %>%
+  summarise(unique_ARS_count = n_distinct(ARS_original)) 
+
+df_wk_hospital_closures_combined_CS_PCA %>%
+  group_by(sub_treated_group) %>%
+  summarise(unique_ARS_count = n_distinct(ARS_original)) 
+
+```
+
+
+## Augmented Synthetic Control Method (ASCM)
+
+```{r}
+library(augsynth)
+df_wk_hospital_closures_combined_ASCM <- df_wk_hospital_closures_combined_CS_large_only
+  #df_wk_hospital_closures_combined_CS
+
+# df_wk_hospital_closures_combined_ASCM <- df_wk_hospital_closures_combined_ASCM %>%
+#   inner_join(
+#     df_wk_hospital_closures_combined_CS %>%
+#       dplyr::select(ARS_original,Demografietyp),
+#     by = "ARS_original",
+#     multiple = "first"
+#   )
+
+analysis_df <- df_wk_hospital_closures_combined_ASCM %>%
+  mutate(year_of_closure = ifelse(is.na(year_of_closure), Inf, year_of_closure),  # Set control units to Inf
+         closure_treated = 1 * (Year >= year_of_closure)) %>%
+    filter(sub_treated_group %in% c(
+#    2010,
+#    2011, 
+    2012,
+    2013,
+    2014,
+    2015,
+    2016,
+    2017,
+    2018
+    ) | sub_treated_group == "Untreated") %>%
+  group_by(ARS_original, Year) %>%
+  slice(1) %>%  # Select only the first row for duplicates
+  ungroup() #%>%
+  #filter(!is.na(Demografietyp))
+
+# Check the number of treated and control units
+table(analysis_df$closure_treated)
+
+head(df_wk_hospital_closures_combined_ASCM)
+head(analysis_df)
+
+# Step 1: Identify ARS_original units with any missing values
+units_with_missing <- analysis_df %>%
+  group_by(ARS_original) %>%
+  summarise(has_missing = any(is.na(treatment_received) |
+                              is.na(population_density_baseline_year) |
+                              is.na(population_density) |
+                              is.na(income_tax_per_capita_baseline_year) |
+                              is.na(income_tax_per_capita) |
+                              is.na(core_budget_debt_per_capita_baseline_year) |
+                              is.na(core_budget_debt_per_capita) |
+                              is.na(finance_PC1) |
+                              is.na(demographics_PC1) |
+                              is.na(Demografietyp))) %>%
+  filter(has_missing) %>%
+  pull(ARS_original)  # Extracts list of units to drop
+
+# Step 2: Drop these units from the dataset
+analysis_df_clean <- analysis_df %>%
+  filter(!ARS_original %in% units_with_missing) %>%
+  filter(!ARS_original %in% c(84360049049, 66320002002, 59620004004))  # Exclude specific IDs manually 84369948949, 
+
+ascm_model_selected_years_A <- multisynth(
+  employment_level_female ~ treatment_received,# | income_tax_per_capita_baseline_year |  core_budget_debt_per_capita_baseline_year + population_density_baseline_year| Demografietyp,#| pca_result_finance * pca_result_demographics,   # Outcome ~ Treatment indicator
+  unit = ARS_original,                         # Unit identifier
+  time = Year,                                 # Time variable
+  data = analysis_df_clean,                           # Partial pooling parameter
+  n_leads = 5,
+#  n_lags = 3,
+  time_cohort = FALSE,
+  nu = 0,
+  progfunc = "ridge", # Here I could use RF for Random Forrest,
+  bootstrap = TRUE,  # Enable bootstrapping
+  n_bootstraps = 500, # Number of resamples
+  k = 5
+  #  scm = T#,
+#  fixedeff = T
+  )
+
+ascm_model_selected_years_summary_A <- summary(ascm_model_selected_years_A)
+
+ascm_model_selected_years_plot_A <- plot(ascm_model_selected_years_A)
+
+ascm_model_selected_years_A
+
+ascm_model_selected_years_summary_A
+
+ascm_model_selected_years_plot_A
+
+analysis_df_clean <- analysis_df_clean %>%
+  mutate(treatment_received = as.numeric(treatment_received)) %>%
+  left_join(df_prep_spillover_3 %>% 
+              dplyr::select(
+                ARS_original,
+                treatment_status_spillover, 
+                spillover_unit, 
+                neighbor_closure_year
+                ),
+            by = "ARS_original",
+            multiple = "any") %>%
+  mutate(
+    neighbor_closure_happened = ifelse(treatment_status_spillover == 1 & neighbor_closure_year <= Year, 1,0),
+    spillover_unit = ifelse(is.na(spillover_unit), 0, spillover_unit)
+  )
+
+
+ascm_model_selected_years_B <- multisynth(
+  employment_level_female ~ treatment_received | income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year + population_density | finance_PC1 + finance_PC2 + demographics_PC1 + demographics_PC2 + population_density | Demografietyp,#| pca_result_finance * pca_result_demographics,   income_tax_per_capita + core_budget_debt_per_capita + population_density
+  # Outcome ~ Treatment indicator
+  unit = ARS_original,                         # Unit identifier
+  time = Year,                                 # Time variable
+  data = analysis_df_clean %>% filter(!treatment_status_spillover == "spillover"),                           # Partial pooling parameter, excluding potential spillovers
+  n_leads = 6,
+  n_lags = 10,
+  time_cohort = FALSE,
+  nu = 0.5,
+  progfunc = "ridge", # Here I could use RF for Random Forrest,
+  bootstrap = TRUE,  # Enable bootstrapping
+  n_bootstraps = 30000, # Number of resamples
+  k = 5,
+  lambda = .6,
+  n_factors = 0,  
+  eps_rel = 1e-9,
+#    scm = T#,
+#  fixedeff = T
+  )
+
+ascm_model_selected_years_summary_B <- summary(ascm_model_selected_years_B)
+
+ascm_model_selected_years_plot_B <- plot(ascm_model_selected_years_B)
+
+ascm_model_selected_years_B
+
+ascm_model_selected_years_summary_B
+
+ascm_model_selected_years_plot_B
+
+#84369948949
+#84360049049
+#66320002002
+```
+
+```{r}
+plot(ascm_model_selected_years_summary_B, levels = "Average")
+```
+
+```{r}
+# Define parameter grid
+param_grid <- expand.grid(
+  nu = c(0.1, 0.3),
+  lambda = c(0.4, 0.6),
+  k = c(3, 5),
+  n_factors = c(0, 1),
+  stringsAsFactors = FALSE
+)
+
+# Run models and collect results
+results <- list()
+for (i in 1:nrow(param_grid)) {
+  model <- multisynth(
+    employment_level_female ~ treatment_received | 
+      income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year + 
+      population_density | finance_PC1 + demographics_PC1 + 
+      population_density | Demografietyp,
+    unit = ARS_original,
+    time = Year,
+    data = analysis_df_clean,
+    n_leads = 6,
+    n_lags = 5,
+    nu = param_grid$nu[i],
+    lambda = param_grid$lambda[i],
+    k = param_grid$k[i],
+    n_factors = param_grid$n_factors[i],
+    progfunc = "ridge",
+    bootstrap = TRUE,
+    n_bootstraps = 200
+  )
+
+  # Save key results
+  results[[i]] <- list(
+    nu = param_grid$nu[i],
+    lambda = param_grid$lambda[i],
+    k = param_grid$k[i],
+    n_factors = param_grid$n_factors[i],
+    att = model$estimates,  # Extract ATT estimate
+    std_error = model$std_errors  # Extract standard error
+  )
+}
+
+# Convert to dataframe for easy comparison
+results_df <- do.call(rbind, lapply(results, data.frame))
+
+```
+
+
+
+
+
+
+## Callaway, SantAnna, “Difference-in-Differences with multiple time periods,”
+
+```{r}
+df_wk_hospital_closures_combined_CS <- df_wk_hospital_closures_combined %>%
+  mutate(year_of_closure = ifelse(is.na(year_of_closure), 0, year_of_closure)) %>%
+  rename(
+    population_density = "Einwohner:innendichte (Einwohner:innen je Hektar)",
+    income_tax_per_capita = "Einkommensteuer (Euro je Einwohner:in)",
+    core_budget_debt_per_capita = "Verschuldung im Kernhaushalt (Euro je Einwohner:in)"
+  ) %>%
+  group_by(ARS_original) %>%
+  mutate(
+    population_density_baseline_year = ifelse(Year == 2006, population_density, NA),
+    income_tax_per_capita_baseline_year = ifelse(Year == 2006, income_tax_per_capita, NA),
+    core_budget_debt_per_capita_baseline_year = ifelse(Year == 2006, core_budget_debt_per_capita, NA),
+    population_total_baseline_year = ifelse(Year == 2006, population_total, NA),
+    staff_population_ratio = staff_doctors_nurses_numeric / population_total_baseline_year
+  ) %>%
+  # Fill baseline values across all years within each ARS_original
+  fill(population_density_baseline_year, .direction = "downup") %>%
+  fill(income_tax_per_capita_baseline_year, .direction = "downup") %>%
+  fill(core_budget_debt_per_capita_baseline_year, .direction = "downup") %>%
+  fill(population_total_baseline_year, .direction = "downup") %>%
+  ungroup()
+
+
+
+# Convert ARS_original to numeric
+df_wk_hospital_closures_combined_CS$ARS_original <- as.numeric(df_wk_hospital_closures_combined_CS$ARS_original)
+
+df_wk_hospital_closures_combined_CS_large_only <- df_wk_hospital_closures_combined_CS %>%
+#  filter(treated_unit == FALSE) %>%
+  mutate(hospital_size_group = case_when(
+    staff_doctors_nurses_numeric < 10 ~ "tiny",
+#    staff_doctors_nurses_numeric < 40 ~ "small",
+#    staff_doctors_nurses_numeric < 80 ~ "medium",
+    TRUE ~ "large"
+  ))%>%
+    filter(hospital_size_group == "large" | treated_unit == 0) %>%
+  filter(complete.cases(
+    population_density_baseline_year, 
+    income_tax_per_capita_baseline_year, 
+    core_budget_debt_per_capita_baseline_year
+  ))
+
+```
+
+```{r}
+# include PCA scores
+df_wk_hospital_closures_combined_CS_large_only <- df_wk_hospital_closures_combined_CS_large_only %>%
+  left_join(df_wk_hospital_closures_combined_CS_PCA %>% 
+              dplyr::select(
+                ARS_original, 
+                Year,
+                demographics_PC1,
+                finance_PC1,
+                demographics_PC2,
+                finance_PC2,
+                demographics_PC3,
+                finance_PC3
+                )) %>%
+  filter(complete.cases(
+    population_density_baseline_year, 
+    income_tax_per_capita_baseline_year, 
+    core_budget_debt_per_capita_baseline_year,
+    demographics_PC1,
+    demographics_PC2,
+    demographics_PC3,
+    finance_PC1,
+    finance_PC2,
+    finance_PC3
+  ))
+
+```
+
+
+###Dynamic ATT
+```{r}
+library(MatchIt)
+unmatched_data <- df_used_for_estimation
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  data = unmatched_data,
+  treat = unmatched_data$treated_unit
+)
+
+df_used_for_estimation_ <- df_used_for_estimation %>%
+  rename(weights_ = weights)
+
+match_model <- matchit(
+  treated_unit ~ population_density_baseline_year + 
+                income_tax_per_capita_baseline_year + 
+                core_budget_debt_per_capita_baseline_year,
+#  data = df_wk_hospital_closures_combined_CS_large_only,
+  data = df_used_for_estimation_,
+  method = "nearest",
+  ratio = 15  # 1:1 matching
+)
+
+matched_data <- match.data(match_model)
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  data = matched_data,
+  treat = matched_data$treated_unit
+)
+
+```
+
+
+
+
+```{r}
+library(did)
+df_wk_hospital_closures_combined_CS_large_only_smoothed <- df_wk_hospital_closures_combined_CS_large_only %>%
+  group_by(ARS_original) %>%
+  mutate(
+    employment_level_female_smoothed = rollmean(employment_level_female, k = 3, fill = NA, align = "center"),
+    employment_level_smoothed = rollmean(employment_level, k = 3, fill = NA, align = "center"),
+    demographic_type_simplified = case_when(
+      Demografietyp %in% c("Typ 1", "Typ 2", "Typ 3") ~ "Aging & Shrinking Municipalities",
+      Demografietyp %in% c("Typ 4", "Typ 5", "Typ 9") ~ "Stable & Rural Growth Centers",
+      Demografietyp %in% c("Typ 6", "Typ 7") ~ "Struggling Urban Centers",
+      Demografietyp %in% c("Typ 8", "Typ 10", "Typ 11") ~ "Affluent & Growing Regions",
+      TRUE ~ NA_character_  # Handle unexpected values
+    #   ),
+    # across(c(demographics_PC1, demographics_PC2, demographics_PC3, 
+    #               finance_PC1, finance_PC2, finance_PC3), scale)
+  #     ) %>%
+  # ungroup()%>%
+  # left_join(
+  #   df_prep_spillover_3 %>% dplyr::select(ARS_original, treatment_status_spillover, spillover_unit, neighbor_closure_year),
+  #           by = "ARS_original", multiple = "any"
+    ))
+
+
+# Run the Callaway & Sant'Anna method without stratification
+CS_baseline_results <- att_gt(
+  yname = "employment_level_female_smoothed",        # Outcome variable
+#  yname = "employment_level",        # Outcome variable
+  tname = "Year",                          # Time variable
+  idname = "ARS_original",                 # Unit identifier
+  gname = "year_of_closure",               # Treatment timing
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed,
+# %>% filter(!treatment_status_spillover == "spillover"), # Dataset
+# %>% filter(demographic_type_simplified == "Stable & Rural Growth Centers"), # Dataset
+#  xformla = ~ demographics_PC1*demographics_PC2*income_tax_per_capita_baseline_year*core_budget_debt_per_capita_baseline_year, #demographic_type_simplified, #population_density_baseline_year, #income_tax_per_capita_baseline_year + population_density_baseline_year +  core_budget_debt_per_capita_baseline_year,
+  control_group = "notyettreated",          # Comparison group
+  anticipation = 0  # Allow 2-year anticipation effect
+)
+
+
+# Summarize and analyze the results
+summary(CS_baseline_results)
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_dynamic_effect <- aggte(
+  CS_baseline_results, 
+  type = "dynamic",
+  min_e = -6,       # Start at year 0 (treatment year)
+  max_e = 6, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_dynamic_effect)
+
+#CS_baseline_dynamic_effect_results_bootstrap <- aggte(CS_baseline_results, type = "dynamic", na.rm = TRUE, bstrap = TRUE)
+
+#summary(CS_baseline_dynamic_effect_results_bootstrap)
+
+# CS_baseline_group_effect <- aggte(CS_baseline_results, type = "group")
+# summary(CS_baseline_group_effect)
+# 
+# ### Aggregate ATT considering only four years post-treatment
+# CS_agg_effect_years_cap <- aggte(
+#   CS_baseline_results,
+#   type = "group",  # Aggregated effect across groups
+#   min_e = 0,       # Start at year 0 (treatment year)
+#   max_e = 5,       # Consider effects up to year 3 (four years in total, including year 0)
+#   na.rm = TRUE     # Remove missing values if any
+# #  bstrap = FALSE  # Turn off bootstrapping
+# )
+# 
+# summary(CS_agg_effect_years_cap)
+
+# year_windows <- list(
+#   c(0, 2),   # Short-term
+#   c(0, 3),   # Short-term
+#   c(0, 4),   # Medium-term
+#   c(0, 5),   # Medium-term
+#   c(0, 7),   # Longer-term
+#   c(1, 2),   # Short-term
+#   c(1, 3),   # Short-term
+#   c(1, 4),   # Medium-term
+#   c(1, 5),   # Medium-term
+#   c(1, 7)    # Longer-term
+# )
+# 
+# results_list <- list()
+# 
+# for (win in year_windows) {
+#   result <- aggte(
+#     CS_baseline_results,
+#     type = "group",
+#     min_e = win[1],
+#     max_e = win[2],
+#     na.rm = TRUE
+#   )
+#   results_list[[paste0("Years_", win[1], "_to_", win[2])]] <- result
+# }
+# 
+# # Compare standard errors for different periods
+# lapply(results_list, summary)
+
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+CS_baseline_dynamic_data <- data.frame(
+  time_periods = CS_baseline_dynamic_effect$egt,       # Relative time periods
+  estimate = CS_baseline_dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = CS_baseline_dynamic_effect$att.egt - 1.96 * CS_baseline_dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_baseline_dynamic_effect$att.egt + 1.96 * CS_baseline_dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+
+CS_agg_effect_years_cap_data <- data.frame(
+  time_periods = CS_agg_effect_years_cap$egt,       # Relative time periods
+  estimate = CS_agg_effect_years_cap$att.egt,      # ATT estimates
+  ci_lower = CS_agg_effect_years_cap$att.egt - 1.96 * CS_agg_effect_years_cap$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_agg_effect_years_cap$att.egt + 1.96 * CS_agg_effect_years_cap$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_baseline_dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+# # Plot the dynamic ATT over time
+# ggplot(CS_agg_effect_years_cap_data, aes(x = time_periods, y = estimate)) +
+#   geom_point() +
+#   geom_line() +
+#   geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+#   geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+#   labs(
+#     title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+#     x = "Years Since Treatment",
+#     y = "Average Treatment Effect (with 95% CI)"
+#   ) +
+#   theme_minimal()
+```
+
+```{r}
+ggdid(CS_baseline_dynamic_effect)
+```
+
+```{r}
+# Load necessary library
+library(ggcorrplot)
+
+# Select only the covariates
+covariates <- df_wk_hospital_closures_combined_CS_large_only %>%
+  dplyr::select(finance_PC1, finance_PC2, finance_PC3, demographics_PC1, demographics_PC2, demographics_PC3)
+
+# Compute correlation matrix
+cor_matrix <- cor(covariates, use = "pairwise.complete.obs")
+
+# Print correlation matrix
+print(cor_matrix)
+
+# Visualize correlation matrix
+ggcorrplot(cor_matrix, type = "lower", lab = TRUE, colors = c("blue", "white", "red"))
+
+```
+
+```{r}
+library(dplyr)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  group_by(year_of_closure) %>%
+  summarise(
+    avg_demo_PC1 = mean(demographics_PC1, na.rm = TRUE),
+    avg_demo_PC2 = mean(demographics_PC2, na.rm = TRUE),
+    avg_demo_PC3 = mean(demographics_PC3, na.rm = TRUE),
+    avg_finance_PC1 = mean(finance_PC1, na.rm = TRUE),
+    avg_finance_PC2 = mean(finance_PC2, na.rm = TRUE),
+    avg_finance_PC3 = mean(finance_PC3, na.rm = TRUE)
+  ) %>%
+  print(n = Inf)  # Ensure all results are displayed
+```
+
+```{r}
+df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  group_by(year_of_closure) %>%
+  summarise(across(c(demographics_PC1, finance_PC1), mean, na.rm = TRUE)) %>%
+  print(n = Inf)
+
+```
+
+```{r}
+library(glmnet)
+
+# Prepare matrix of predictors
+X <- model.matrix(~ demographics_PC1 + finance_PC1 + finance_PC2, 
+                  data = df_wk_hospital_closures_combined_CS_large_only_smoothed)[, -1]
+
+y <- as.factor(df_wk_hospital_closures_combined_CS_large_only_smoothed$year_of_closure)  # Convert to categorical
+
+# Fit multinomial ridge regression
+ridge_ps_model <- cv.glmnet(X, y, alpha = 0, family = "multinomial")
+
+# Extract fitted propensity scores for each class
+pscore_matrix <- predict(ridge_ps_model, newx = X, type = "response")
+
+# Store the probabilities for each treatment group
+df_wk_hospital_closures_combined_CS_large_only_smoothed$pscore <- apply(pscore_matrix, 1, max)  # Take max prob for each row
+
+# df_wk_hospital_closures_combined_CS_large_only_smoothed <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+#   filter(pscore > 0.05 & pscore < 0.95)
+
+
+```
+
+```{r}
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed$pscore)
+sum(is.na(df_wk_hospital_closures_combined_CS_large_only_smoothed$pscore))
+
+```
+
+```{r}
+library(WeightIt)
+
+# Estimate entropy weights
+ebal_weights <- weightit(
+  year_of_closure ~ demographics_PC1 + demographics_PC2 + demographics_PC3 + finance_PC1 + finance_PC2 + finance_PC3,
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed,
+  method = "ebal"
+)
+
+# Apply weights in `att_gt()`
+df_wk_hospital_closures_combined_CS_large_only_smoothed$ebal_weights <- ebal_weights$weights
+
+CS_baseline_results <- att_gt(
+  yname = "employment_level_female_smoothed",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed,
+  xformla = ~ 1,  # No direct covariates, weights do the balancing
+  weightsname = "ebal_weights",
+  control_group = "notyettreated",
+  anticipation = 0
+)
+
+# Summarize and analyze the results
+summary(CS_baseline_results)
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_dynamic_effect <- aggte(
+  CS_baseline_results, 
+  type = "dynamic",
+#  min_e = -7,       # Start at year 0 (treatment year)
+  max_e = 7, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_dynamic_effect)
+```
+
+```{r}
+library(dplyr)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  group_by(year_of_closure > 0) %>%
+  summarise(
+    avg_demo_PC1 = mean(demographics_PC1, na.rm = TRUE),
+    avg_demo_PC2 = mean(demographics_PC2, na.rm = TRUE),
+    avg_demo_PC3 = mean(demographics_PC3, na.rm = TRUE),
+    avg_finance_PC1 = mean(finance_PC1, na.rm = TRUE),
+    avg_finance_PC2 = mean(finance_PC2, na.rm = TRUE),
+    avg_finance_PC3 = mean(finance_PC3, na.rm = TRUE)
+  )
+
+```
+
+```{r}
+summary(ebal_weights$weights)
+
+```
+
+
+```{r}
+# Identify ARS_original values where any NA exists
+municipalities_with_na <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  group_by(ARS_original) %>%
+  summarise(has_na = any(is.na(demographics_PC1) | is.na(finance_PC1) | is.na(finance_PC2) | is.na(treated_unit))) %>%
+  filter(has_na) %>%
+  pull(ARS_original)  # Extract ARS_original values to remove
+
+```
+
+```{r}
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+
+```
+
+###Seperation of Weighting
+
+##### Matching before Weighting, then Callaway SantAnna
+```{r Matching (with stratification by demographic type), Matchit}
+# identify demographic type distribution among treated units
+library(dplyr)
+library(ggplot2)
+
+# Check distribution of demographic types in treated & control groups
+df_demographic_distribution <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  distinct(ARS_original, .keep_all = TRUE) %>%
+  group_by(Demografietyp, treated_unit) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = treated_unit, values_from = count, values_fill = 0) %>%
+  rename(Control = `0`, Treated = `1`) %>%
+  mutate(Total = Control + Treated, 
+         Treated_Share = Treated / Total)
+
+# Display summary table
+print(df_demographic_distribution)
+
+# Plot demographic type distribution
+ggplot(df_demographic_distribution, aes(x = Demografietyp, y = Treated_Share)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +  # Flip to make it more readable
+  labs(title = "Share of Treated Units Within Each Demographic Type",
+       x = "Demographic Type",
+       y = "Proportion Treated") +
+  theme_minimal()
+
+sum(df_demographic_distribution$Total)
+```
+
+```{r}
+# match from entire sample via stratification to create subsample
+library(MatchIt)
+library(dplyr)
+
+# Ensure each unit (ARS_original) appears only once
+df_unique_units <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%   
+  filter(!is.na(Demografietyp)) %>%
+  distinct(ARS_original, .keep_all = TRUE) %>%
+  mutate(
+    Demografietyp = as.factor(Demografietyp)
+  )
+
+match_model <- matchit(
+      treated_unit ~ Demografietyp,  # Other covariates for matching
+      data = df_unique_units,
+      method = "nearest",  # Nearest neighbor matching
+      ratio = 1,  # ⬅️ Match each treated unit to 5 controls
+      replace = FALSE  # ⬅️ Ensures matches are similar
+    )
+
+match_model
+
+# Extract the matched dataset
+df_matched <- match.data(match_model)
+
+# Compute treated and control counts per demographic type and their ratio
+df_matched %>%
+  group_by(Demografietyp, treated_unit) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = treated_unit, values_from = count, values_fill = 0) %>%
+  rename(Control = `0`, Treated = `1`) %>%
+  mutate(
+    Total = Control + Treated, 
+    Treated_Share = Treated / Total,  # Proportion of treated
+    Treated_to_Control_Ratio = ifelse(Control > 0, Treated / Control, NA)  # Compute ratio
+  )
+
+```
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# Ensure each unit appears only once and remove NAs
+df_unique_units <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  ungroup() %>%
+#  filter(!Year >= 2021) %>%
+  filter(!is.na(Demografietyp)) %>%
+  filter(!Demografietyp == "Typ 7") %>%
+  filter(!sub_treated_group >= 2020 | treated_unit == 0) %>%
+  filter(staff_doctors_nurses_numeric >= 20| treated_unit == 0) %>%
+  distinct(ARS_original, .keep_all = TRUE)
+
+# Number of runs
+n_runs <- 100
+matching_ratio <- 20  # Number of controls per treated unit
+
+# Store matched datasets
+matched_datasets <- vector("list", n_runs)
+
+for (i in 1:n_runs) {
+  
+  set.seed(i * 100)  # Set a different seed for each run
+
+  # Create an empty list to store matched subsets per Demografietyp
+  matched_subsamples <- list()
+
+  # Loop through each Demografietyp
+  for (demo_type in unique(df_unique_units$Demografietyp)) {
+    
+    # Subset data for this demographic type
+    df_subset <- df_unique_units %>%
+      filter(Demografietyp == demo_type)
+    
+    # Count treated units
+    treated_units <- df_subset %>% filter(treated_unit == 1)
+    control_units <- df_subset %>% filter(treated_unit == 0)
+    
+    num_treated <- nrow(treated_units)
+    num_controls_needed <- num_treated * matching_ratio
+
+    # Ensure there are enough controls to sample
+    if (num_controls_needed > nrow(control_units)) {
+      sampled_controls <- control_units  # Take all available controls if not enough
+    } else {
+      sampled_controls <- control_units %>%
+        slice_sample(n = num_controls_needed, replace = FALSE)  # Random selection
+    }
+    
+    # Combine treated and sampled control units
+    matched_subset <- bind_rows(treated_units, sampled_controls)
+    matched_subsamples[[demo_type]] <- matched_subset
+  }
+  
+  # Combine all demographic-type samples into a single matched dataset
+  df_matched <- bind_rows(matched_subsamples)
+
+  # Compute treated & control counts per demographic type
+  df_summary <- df_matched %>%
+    group_by(Demografietyp, treated_unit) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    pivot_wider(names_from = treated_unit, values_from = count, values_fill = 0) %>%
+    rename(Control = `0`, Treated = `1`) %>%
+    mutate(
+      Total = Control + Treated,
+      Treated_Share = Treated / Total,
+      Treated_to_Control_Ratio = ifelse(Control > 0, Treated / Control, NA)
+    )
+
+  # Store matched dataset in the list
+  matched_datasets[[i]] <- list(
+    matched_data = df_matched,
+    summary_stats = df_summary
+  )
+
+  print(paste("Randomized Matching Run", i, "completed."))
+}
+
+# Check if the datasets are now different
+identical(matched_datasets[[5]], matched_datasets[[1]])  # Should return FALSE now
+
+```
+
+
+```{r Weighting (to fine-tune balance), twang}
+# run weighting on subsample, might be reintegrated into Diff-in-Diff
+library(twang)
+
+
+df_matched <- df_matched %>%
+  mutate(treated_unit = ifelse(year_of_closure > 0, 1, 0))  # Convert to binary 0/1
+
+ps_model <- ps(
+  treated_unit ~ demographics_PC1 + demographics_PC2 + demographics_PC3 + finance_PC1 + finance_PC2 + finance_PC3,
+  #
+  data = df_matched,
+  stop.method = "es.mean",  # Use entropy-based stopping
+  estimand = "ATT", 
+  n.trees = 3000,  # More iterations to improve fit
+  shrinkage = 0.01,  # More conservative weighting
+#  trim.level = 0.01  # Trims extreme weights
+)
+
+# Extract stabilized weights
+df_matched$gbm_weights <- ps_model$w
+plot(ps_model, plots = 1)
+#plot(ps_model, plots = 2)
+plot(ps_model, plots = 3)
+plot(ps_model, plots = 4)
+plot(ps_model, plots = 5)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_small_weighted_sample <-  df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  inner_join(df_matched %>%
+              dplyr::select(gbm_weights, ARS_original))
+
+```
+
+```{r}
+library(twang)
+library(dplyr)
+library(purrr)
+
+# Number of runs was defined previously during matching
+
+# List to store weighted datasets
+weighted_datasets <- vector("list", n_runs)
+
+for (i in 1:n_runs) {
+  
+  df_matched <- as.data.frame(matched_datasets[[i]]$matched_data, check.names = FALSE)
+  
+  # Ensure binary treatment variable
+  df_matched <- df_matched %>%
+    mutate(treated_unit = ifelse(year_of_closure > 0, 1, 0))  # Convert to binary 0/1
+  
+  # Run propensity score weighting
+  ps_model <- ps(
+    treated_unit ~ demographics_PC1 + demographics_PC2 + demographics_PC3 + finance_PC1 + finance_PC2 + finance_PC3,
+    data = df_matched,
+    stop.method = "es.mean",  # Use entropy-based stopping
+    estimand = "ATT",
+    n.trees = 5000,  # More iterations to improve fit
+    shrinkage = 0.01  # More conservative weighting
+    # trim.level = 0.01  # Trims extreme weights
+  )
+  
+  # Extract stabilized weights
+  df_matched$gbm_weights <- ps_model$w
+
+  # Store the weighted dataset
+  weighted_datasets[[i]] <- list(
+    weighted_data = df_matched,
+    ps_model = ps_model
+  )
+
+  print(paste("Weighting run", i, "completed."))
+}
+
+```
+
+
+```{r}
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_small_weighted_sample$gbm_weights)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_small_weighted_sample <- df_wk_hospital_closures_combined_CS_large_only_smoothed_small_weighted_sample %>%
+  mutate(gbm_weights = unlist(gbm_weights))  # Force flattening into a vector
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+
+# List to store processed datasets
+processed_weighted_datasets <- vector("list", length(weighted_datasets))
+
+for (i in seq_along(weighted_datasets)) {
+  
+  df_weighted <- weighted_datasets[[i]]$weighted_data  # Extract dataset
+  
+  # Ensure weights are numeric
+  df_weighted <- df_weighted %>%
+    mutate(gbm_weights = as.numeric(unlist(gbm_weights)))  # Convert from list to vector
+  
+  # Check for NAs and extreme weights
+  df_weighted <- df_weighted %>%
+    mutate(gbm_weights = ifelse(is.na(gbm_weights), mean(gbm_weights, na.rm = TRUE), gbm_weights))  # Fill missing values
+  
+  # Store processed dataset
+  processed_weighted_datasets[[i]] <- df_weighted
+  
+  print(paste("Processing completed for weighted dataset", i))
+}
+```
+
+
+```{r}
+
+df_desperate_last_attempt_small_weighted_sample <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  inner_join(
+    df_wk_hospital_closures_combined_CS_large_only_smoothed_small_weighted_sample %>%
+      dplyr::select(ARS_original, Year, gbm_weights),  # Only include necessary columns
+    by = c("ARS_original", "Year")  # Match based on ARS_original & Year
+  ) %>%
+  group_by(ARS_original) %>%
+  mutate(
+    gbm_weights = ifelse(is.na(gbm_weights), mean(gbm_weights, na.rm = TRUE), gbm_weights),
+    dummy_weights = 1
+    ) %>%
+  ungroup()
+
+df_desperate_last_attempt_small_weighted_sample_spillover <- df_desperate_last_attempt_small_weighted_sample %>%
+  left_join(
+    df_prep_spillover_3 %>% dplyr::select(ARS_original, treatment_status_spillover, spillover_unit, neighbor_closure_year),
+            by = "ARS_original", multiple = "any"
+    )
+
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+
+# List to store fully processed datasets
+final_weighted_datasets <- vector("list", length(processed_weighted_datasets))
+
+for (i in seq_along(processed_weighted_datasets)) {
+  
+  df_weighted <- processed_weighted_datasets[[i]]  # Extract processed weighted dataset
+  
+  # Merge with full dataset and handle missing values
+  df_merged <-df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+    inner_join(
+      df_weighted %>%
+        dplyr::select(ARS_original, Year, gbm_weights),  # Keep only necessary columns
+      by = c("ARS_original")  # Merge on unit ID & year
+    ) %>%
+    group_by(ARS_original) %>%
+    mutate(
+      gbm_weights = ifelse(is.na(gbm_weights), mean(gbm_weights, na.rm = TRUE), gbm_weights),  # Handle missing values
+      dummy_weights = 1  # Create dummy weights
+    ) %>%
+    ungroup()
+  
+  # Merge with spillover data
+  df_merged_spillover <- df_merged %>%
+    left_join(
+      df_prep_spillover_3 %>%
+        dplyr::select(ARS_original, treatment_status_spillover, spillover_unit, neighbor_closure_year),
+      by = "ARS_original", multiple = "any"
+    )
+
+  # Store the final dataset
+  final_weighted_datasets[[i]] <- df_merged_spillover
+  
+  print(paste("Final dataset preparation completed for run", i))
+}
+
+
+```
+
+
+
+```{r Running att_gt() (Difference-in-Differences)}
+# run model, no covariation included at this stage if weighting is outsourced
+CS_baseline_results_overall_small_weighted_sample <- att_gt(
+  yname = "employment_level",
+#  yname = "employment_level_smoothed",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+    #"neighbor_closure_year",
+  data = df_desperate_last_attempt_small_weighted_sample_spillover,
+  #%>% filter(treatment_status_spillover != "spillover"),
+  weightsname = "gbm_weights",  
+#  xformla = ~ demographics_PC1 + finance_PC1,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Summarize and analyze the results
+summary(CS_baseline_results_overall_small_weighted_sample)
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_overall_small_weighted_sample_dynamic_effect <- aggte(
+  CS_baseline_results_overall_small_weighted_sample, 
+  type = "dynamic",
+#  min_e = -7,       # Start at year 0 (treatment year)
+  max_e = 7, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_overall_small_weighted_sample_dynamic_effect)
+
+ggdid(CS_baseline_overall_small_weighted_sample_dynamic_effect)
+```
+
+```{r}
+library(did)
+library(purrr)
+
+# List to store ATT and dynamic ATT results
+att_results_list <- vector("list", length(final_weighted_datasets))
+
+# Loop over all datasets and estimate ATT + dynamic ATT
+for (i in seq_along(final_weighted_datasets)) {
+  
+  df_weighted <- final_weighted_datasets[[i]]  # Extract one dataset
+
+  # Run att_gt model
+  att_results <- att_gt(
+    yname = "employment_level_smoothed",
+    #employment_level_female_smoothed
+    tname = "Year.x",
+    idname = "ARS_original",
+    gname = "year_of_closure",
+    data = df_weighted,
+    weightsname = "gbm_weights",  
+    control_group = "notyettreated",  
+    anticipation = 0
+#    bstrap = TRUE,
+#    biters = 5000  # Bootstrap iterations
+  )
+
+  # Compute dynamic ATT over time
+  att_dynamic_effect <- aggte(
+    att_results, 
+    type = "dynamic",
+#    min_e = -6,
+    max_e = 6,  
+    na.rm = TRUE,
+    bstrap = TRUE  
+  )
+
+  # Store both static and dynamic ATT results
+  att_results_list[[i]] <- list(
+    att_model = att_results,
+    dynamic_effect = att_dynamic_effect
+  )
+
+  print(paste("ATT model & dynamic ATT completed for dataset", i))
+}
+
+```
+
+
+```{r Averaging the final ATT results across replications}
+library(dplyr)
+library(purrr)
+
+# Extract ATT estimates from all models
+att_overall_results <- map_df(att_results_list, function(x) {
+  tibble(
+    att_estimate = mean(x$att_model$att, na.rm = TRUE),  # Compute mean ATT across periods
+    att_se = mean(x$att_model$se, na.rm = TRUE)          # Compute mean SE across periods
+  )
+})
+
+# Ensure no missing values
+att_overall_results <- att_overall_results %>%
+  filter(!is.na(att_estimate)) %>%  # Remove missing values
+  mutate(
+    ci_lower = att_estimate - 1.96 * att_se,
+    ci_upper = att_estimate + 1.96 * att_se
+  )
+
+# Summary statistics
+summary(att_overall_results)
+
+
+
+```
+  att_estimate          att_se          ci_lower      
+ Min.   :-0.12683   Min.   :0.2512   Min.   :-0.8574  
+ 1st Qu.:-0.07559   1st Qu.:0.2952   1st Qu.:-0.6871  
+ Median :-0.04050   Median :0.3099   Median :-0.6544  
+ Mean   :-0.04368   Mean   :0.3093   Mean   :-0.6500  
+ 3rd Qu.:-0.01465   3rd Qu.:0.3238   3rd Qu.:-0.6036  
+ Max.   : 0.05029   Max.   :0.3727   Max.   :-0.4910  
+    ci_upper     
+ Min.   :0.4068  
+ 1st Qu.:0.5207  
+ Median :0.5633  
+ Mean   :0.5626  
+ 3rd Qu.:0.6019  
+ Max.   :0.7258  
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(purrr)
+
+# Extract dynamic ATT results from all models
+all_dynamic_results <- map_df(seq_along(att_results_list), function(i) {
+  tibble(
+    time_periods = att_results_list[[i]]$dynamic_effect$egt,       
+    estimate = att_results_list[[i]]$dynamic_effect$att.egt,      
+    ci_lower = att_results_list[[i]]$dynamic_effect$att.egt - 1.96 * att_results_list[[i]]$dynamic_effect$se.egt,  
+    ci_upper = att_results_list[[i]]$dynamic_effect$att.egt + 1.96 * att_results_list[[i]]$dynamic_effect$se.egt,   
+    run = i  # Assign unique run ID
+  )
+})
+
+# Compute mean and confidence intervals across all runs
+summary_dynamic_results <- all_dynamic_results %>%
+  group_by(time_periods) %>%
+  summarise(
+    mean_estimate = mean(estimate, na.rm = TRUE),
+    mean_ci_lower = mean(ci_lower, na.rm = TRUE),
+    mean_ci_upper = mean(ci_upper, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot
+ggplot() +
+  # Add individual model results as transparent lines
+  geom_line(data = all_dynamic_results, 
+            aes(x = time_periods, y = estimate, group = run),
+            color = "gray", alpha = 0.2) +
+  
+  # Add mean ATT estimates and confidence intervals
+  geom_line(data = summary_dynamic_results, 
+            aes(x = time_periods, y = mean_estimate), color = "blue", size = 1) +
+  geom_ribbon(data = summary_dynamic_results, 
+              aes(x = time_periods, ymin = mean_ci_lower, ymax = mean_ci_upper), 
+              fill = "blue", alpha = 0.2) +
+  
+  # Add reference lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+
+  # Labels and themes
+  labs(
+    title = "Dynamic ATT Over Time (100 Model Runs)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(min(all_dynamic_results$time_periods), 
+                                  max(all_dynamic_results$time_periods), by = 1))
+
+```
+
+
+```{r}
+library(dplyr)
+library(purrr)
+
+# Extract overall ATT estimates from all models
+att_overall_results <- map_df(att_results_list, function(x) {
+  tibble(
+    att_estimate = x$dynamic_effect$overall.att,  # Extract overall ATT
+    att_se = x$dynamic_effect$overall.se          # Extract standard error
+  )
+})
+
+# Ensure no missing values
+att_overall_results <- att_overall_results %>%
+  filter(!is.na(att_estimate)) %>%  # Remove any missing values
+  mutate(
+    ci_lower = att_estimate - 1.96 * att_se,
+    ci_upper = att_estimate + 1.96 * att_se
+  )
+
+# Summary statistics
+summary(att_overall_results)
+
+library(ggplot2)
+
+# Plot histogram of ATT estimates
+ggplot(att_overall_results, aes(x = att_estimate)) +
+  geom_histogram(binwidth = 0.05, fill = "steelblue", alpha = 0.7, color = "black") +
+  geom_vline(xintercept = mean(att_overall_results$att_estimate), linetype = "dashed", color = "red") +
+  labs(title = "Distribution of ATT Estimates Across 100 Runs",
+       x = "ATT Estimate",
+       y = "Count") +
+  theme_minimal()
+
+
+library(metafor)
+
+# Run meta-analysis using a random-effects model
+meta_analysis <- rma.uni(yi = att_overall_results$att_estimate, 
+                         sei = att_overall_results$att_se, 
+                         method = "REML")  # Restricted Maximum Likelihood Estimation
+
+# Display meta-analysis results
+summary(meta_analysis)
+
+meta_analysis_2 <- rma.uni(yi = att_overall_results$att_estimate, 
+                         sei = att_overall_results$att_se, 
+                         method = "REML",
+                         knha = TRUE)  # Knapp-Hartung adjustment for more conservative inference
+
+# Display meta-analysis results
+summary(meta_analysis_2)
+
+library(metafor)
+
+# Generate forest plot
+forest(meta_analysis, 
+       xlab = "Treatment Effect (ATT Estimate)", 
+       slab = paste("Model", 1:100), 
+       cex = 0.8) 
+
+
+```
+
+  att_estimate         att_se          ci_lower      
+ Min.   :-0.5176   Min.   :0.1695   Min.   :-1.0275  
+ 1st Qu.:-0.4260   1st Qu.:0.1933   1st Qu.:-0.8260  
+ Median :-0.3661   Median :0.2009   Median :-0.7677  
+ Mean   :-0.3772   Mean   :0.2037   Mean   :-0.7764  
+ 3rd Qu.:-0.3334   3rd Qu.:0.2111   3rd Qu.:-0.7315  
+ Max.   :-0.2143   Max.   :0.2613   Max.   :-0.5929  
+    ci_upper       
+ Min.   :-0.15408  
+ 1st Qu.:-0.02847  
+ Median : 0.02752  
+ Mean   : 0.02212  
+ 3rd Qu.: 0.07366  
+ Max.   : 0.18862  
+
+```{r structure for overall-pipeline, not yet adapted to my case}
+library(MatchIt)
+library(twang)
+library(did)  # Callaway & Sant'Anna
+library(dplyr)
+
+set.seed(123)  # Ensure reproducibility
+
+n_boot <- 100  # Number of bootstrap iterations
+results_list <- list()
+
+for (i in 1:n_boot) {
+  print(paste("Iteration:", i))
+  
+  # Step 1: Stratified Matching within Each Demographic Type
+  matched_data_list <- list()
+  demographic_types <- unique(df_wk_hospital_closures_combined_CS_large_only_smoothed_$demographic_type_simplified)
+  
+  for (type in demographic_types) {
+    df_subset <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>% 
+      filter(demographic_type_simplified == type)
+    
+    if (nrow(df_subset[df_subset$treated_unit == 1, ]) > 0) {  # Ensure treated units exist
+      match_model <- matchit(
+        treated_unit ~ demographics_PC1 + finance_PC1 + finance_PC2,
+        data = df_subset,
+        method = "nearest",
+        ratio = 5,
+        caliper = 0.2
+      )
+      
+      matched_data_list[[type]] <- match.data(match_model)
+    }
+  }
+  
+  df_matched <- bind_rows(matched_data_list)
+  
+  # Step 2: Propensity Score Weighting on Matched Data
+  ps_model <- ps(
+    treated_unit ~ demographics_PC1 + finance_PC1 + finance_PC2,
+    data = df_matched,
+    stop.method = "ks.mean",
+    estimand = "ATE",
+    n.trees = 10000,
+    shrinkage = 0.001,
+    trim.level = 0.01
+  )
+  
+  df_matched$weights <- ps_model$w  # Assign weights
+  
+  # Step 3: Run Callaway & Sant’Anna `att_gt()` Model
+  CS_results <- att_gt(
+    yname = "employment_level_female_smoothed",
+    tname = "Year",
+    idname = "ARS_original",
+    gname = "year_of_closure",
+    data = df_matched,
+    weightsname = "weights",
+    control_group = "notyettreated",
+    anticipation = 0
+  )
+  
+  # Step 4: Extract and Store Results
+  CS_dynamic_results <- aggte(CS_results, type = "dynamic")
+  
+  results_list[[i]] <- data.frame(
+    time_periods = CS_dynamic_results$egt,
+    estimate = CS_dynamic_results$att.egt,
+    ci_lower = CS_dynamic_results$att.egt - 1.96 * CS_dynamic_results$se.egt,
+    ci_upper = CS_dynamic_results$att.egt + 1.96 * CS_dynamic_results$se.egt,
+    iteration = i  # Keep track of bootstrap iteration
+  )
+}
+
+# Combine All Results
+df_bootstrap_results <- bind_rows(results_list)
+```
+
+
+##### Pre-Weighting Approach
+```{r}
+library(twang)
+
+# Remove all rows where ARS_original is in the list of municipalities with NA
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  filter(!ARS_original %in% municipalities_with_na)
+
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(treated_unit = ifelse(year_of_closure > 0, 1, 0))  # Convert to binary 0/1
+
+
+ps_model <- ps(
+  treated_unit ~ demographics_PC1 + demographics_PC2 + demographics_PC3 + finance_PC1 + finance_PC2 + finance_PC3,
+  #
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed_,
+#  stop.method = "cov",  # Use entropy-based stopping
+  estimand = "ATE", 
+  n.trees = 5000,  # More iterations to improve fit
+  shrinkage = 0.005,  # More conservative weighting
+  trim.level = 0.01  # Trims extreme weights
+)
+
+# Extract stabilized weights
+df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights <- ps_model$w
+plot(ps_model, plots = 1)
+#plot(ps_model, plots = 2)
+plot(ps_model, plots = 3)
+plot(ps_model, plots = 4)
+plot(ps_model, plots = 5)
+```
+
+
+
+
+```{r}
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(gbm_weights = unlist(gbm_weights))  # Force flattening into a vector
+# 
+# 
+# df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+#   mutate(gbm_weights = as.numeric(gbm_weights))
+
+# Find 2nd and 98th percentile cutoffs
+#lower_cap <- quantile(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights, 0.0175, na.rm = TRUE)
+upper_cap <- quantile(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights, 0.995, na.rm = TRUE)
+
+# Apply lower and upper caps
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(gbm_weights = ifelse(gbm_weights > upper_cap, upper_cap, gbm_weights)
+         #,gbm_weights = ifelse(gbm_weights < lower_cap, lower_cap, gbm_weights)
+         )
+
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+```
+```{r}
+library(dplyr)
+
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+
+# Convert weights to numeric to avoid list-type issues
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(gbm_weights = as.numeric(unlist(gbm_weights)))  
+
+# Find the 98th percentile cutoff
+upper_cap <- quantile(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights, 0.9825, na.rm = TRUE)
+
+# Remove rows where weights are above the upper cap
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  filter(gbm_weights <= upper_cap)
+
+# Check new weight distribution
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+
+```
+
+
+```{r}
+library(dplyr)
+
+df_desperate_last_attempt <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  left_join(
+    df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+      dplyr::select(ARS_original, Year, gbm_weights),  # Only include necessary columns
+    by = c("ARS_original", "Year")  # Match based on ARS_original & Year
+  ) %>%
+  group_by(ARS_original) %>%
+  mutate(
+    gbm_weights = ifelse(is.na(gbm_weights), mean(gbm_weights, na.rm = TRUE), gbm_weights),
+    dummy_weights = 1
+    ) %>%
+  ungroup()
+
+df_desperate_last_attempt_spillover <- df_desperate_last_attempt %>%
+  left_join(
+    df_prep_spillover_3 %>% dplyr::select(ARS_original, treatment_status_spillover, spillover_unit, neighbor_closure_year),
+            by = "ARS_original", multiple = "any"
+    )
+
+```
+
+```{r}
+CS_baseline_results_overall <- att_gt(
+  yname = "employment_level_smoothed",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+    #"neighbor_closure_year",
+  data = df_desperate_last_attempt_spillover,
+  #%>% filter(treatment_status_spillover != "direct_treated"),
+  weightsname = "gbm_weights",  
+#  xformla = ~ demographics_PC1 + finance_PC1,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Summarize and analyze the results
+summary(CS_baseline_results_overall)
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_overall_dynamic_effect <- aggte(
+  CS_baseline_results_overall, 
+  type = "dynamic",
+#  min_e = -7,       # Start at year 0 (treatment year)
+  max_e = 7, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_overall_dynamic_effect)
+
+ggdid(CS_baseline_dynamic_effect)
+
+```
+dummy_weights: -0.5801	0.2185	-1.0085	-0.1518	*
+gbm_weights cut 95%: -0.5789	0.2369	-1.0432	-0.1145	*
+gbm_weights cut 99%: -0.4284	0.2561	-0.9304	0.0736	
+
+```{r}
+CS_baseline_results_female <- att_gt(
+  yname = "employment_level_female_smoothed",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  data = df_desperate_last_attempt,# %>% filter(year_of_closure == 0 | !(year_of_closure >= 2005 & year_of_closure <= 2010)),
+  weightsname = "gbm_weights",  
+#  xformla = ~ demographics_PC1 + finance_PC1,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Summarize and analyze the results
+summary(CS_baseline_results_female)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_female_dynamic_effect <- aggte(
+  CS_baseline_results_female, 
+  type = "dynamic",
+  min_e = -6,       # Start at year 0 (treatment year)
+  max_e = 6, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_female_dynamic_effect)
+
+ggdid(CS_baseline_female_dynamic_effect)
+
+```
+
+```{r}
+# Extract the dynamic ATT results for both models
+CS_baseline_overall_dynamic_data <- data.frame(
+  time_periods = CS_baseline_overall_dynamic_effect$egt,       
+  estimate = CS_baseline_overall_dynamic_effect$att.egt,      
+  ci_lower = CS_baseline_overall_dynamic_effect$att.egt - 1.96 * CS_baseline_overall_dynamic_effect$se.egt,  
+  ci_upper = CS_baseline_overall_dynamic_effect$att.egt + 1.96 * CS_baseline_overall_dynamic_effect$se.egt,   
+  group = "Overall"  # Label for legend
+)
+
+CS_baseline_female_dynamic_data <- data.frame(
+  time_periods = CS_baseline_female_dynamic_effect$egt,       
+  estimate = CS_baseline_female_dynamic_effect$att.egt,      
+  ci_lower = CS_baseline_female_dynamic_effect$att.egt - 1.96 * CS_baseline_female_dynamic_effect$se.egt,  
+  ci_upper = CS_baseline_female_dynamic_effect$att.egt + 1.96 * CS_baseline_female_dynamic_effect$se.egt,   
+  group = "Female Employment"  # Label for legend
+)
+
+# Combine both datasets
+CS_combined_dynamic_data <- rbind(CS_baseline_overall_dynamic_data, CS_baseline_female_dynamic_data)
+
+# Plot both in the same graph
+ggplot(CS_combined_dynamic_data, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Overall vs. Female Employment)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)",
+    color = "Group",
+    fill = "Group"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Overall" = "blue", "Female Employment" = "darkgreen")) +
+  scale_fill_manual(values = c("Overall" = "blue", "Female Employment" = "darkgreen")) + 
+  scale_x_continuous(breaks = seq(min(CS_combined_dynamic_data$time_periods), max(CS_combined_dynamic_data$time_periods), by = 1)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1)
+
+
+
+```
+
+
+```{r}
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+CS_baseline_dynamic_data <- data.frame(
+  time_periods = CS_baseline_dynamic_effect$egt,       # Relative time periods
+  estimate = CS_baseline_dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = CS_baseline_dynamic_effect$att.egt - 1.96 * CS_baseline_dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_baseline_dynamic_effect$att.egt + 1.96 * CS_baseline_dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_baseline_dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+
+```
+
+
+
+
+```{r}
+CS_dynamic_results <- aggte(CS_baseline_results, type = "dynamic")
+
+pre_treatment_att <- as.numeric(CS_dynamic_results$att.egt[CS_dynamic_results$egt < 0])
+pre_treatment_se <- as.numeric(CS_dynamic_results$se.egt[CS_dynamic_results$egt < 0])
+
+# Compute the t-statistic
+t_stat <- mean(pre_treatment_att, na.rm = TRUE) / mean(pre_treatment_se, na.rm = TRUE)
+
+# Compute the two-sided p-value
+p_value <- 2 * (1 - pnorm(abs(t_stat)))
+
+# Print the results
+print(paste("T-statistic:", round(t_stat, 3)))
+print(paste("P-value:", round(p_value, 5)))
+
+```
+
+
+#####Replication Different Weighting 
+
+```{r}
+library(twang)
+library(fastDummies)
+
+# Remove all rows where ARS_original is in the list of municipalities with NA
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  filter(!ARS_original %in% municipalities_with_na)
+
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(treated_unit = ifelse(year_of_closure > 0, 1, 0)) %>% # Convert to binary 0/1
+  mutate(across(demographic_type_simplified, as.factor)) #%>%  # Ensure it's a factor
+#  mutate(across(demographic_type_simplified, ~ as.numeric(. == levels(.)), .names = "type_{col}_{.}")) %>%
+
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- fastDummies::dummy_cols(
+  df_wk_hospital_closures_combined_CS_large_only_smoothed_,
+  select_columns = "demographic_type_simplified",
+  remove_selected_columns = FALSE  # Removes original categorical column
+) %>%
+  rename(
+    demographic_type_simplified_affluent_and_growing_regions = "demographic_type_simplified_Affluent & Growing Regions",
+    demographic_type_simplified_struggling_urban_centers = "demographic_type_simplified_Struggling Urban Centers",
+    demographic_type_simplified_aging_and_shirnking_municipalities = "demographic_type_simplified_Aging & Shrinking Municipalities", 
+    demographic_type_simplified_stable_and_rural_growth_centers = "demographic_type_simplified_Stable & Rural Growth Centers"
+  ) %>%
+  data.frame(  check.names = FALSE)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_2008 <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  filter(Year == 2008)
+
+ps_model <- ps(
+  treated_unit ~  
+    demographic_type_simplified_affluent_and_growing_regions +
+    demographic_type_simplified_struggling_urban_centers +
+    demographic_type_simplified_aging_and_shirnking_municipalities + 
+    demographic_type_simplified_stable_and_rural_growth_centers,
+    #demographics_PC1 + demographics_PC2 + demographics_PC3 + finance_PC1 + finance_PC2 + finance_PC3,
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed_2008,
+  stop.method = "es.mean",  # Use entropy-based stopping
+  estimand = "ATE", 
+  n.trees = 10000,  # More iterations to improve fit
+  shrinkage = 0.005  # More conservative weighting
+#  trim.level = 0.01  # Trims extreme weights
+)
+
+# Extract stabilized weights
+# Extract stabilized weights
+df_wk_hospital_closures_combined_CS_large_only_smoothed_2008$gbm_weights <- ps_model$w
+plot(ps_model, plots = 1)
+#plot(ps_model, plots = 2)
+plot(ps_model, plots = 3)
+plot(ps_model, plots = 4)
+plot(ps_model, plots = 5)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <-  df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  left_join(df_wk_hospital_closures_combined_CS_large_only_smoothed_2008 %>%
+              dplyr::select(gbm_weights, ARS_original))
+```
+
+```{r}
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(gbm_weights = unlist(gbm_weights))  # Force flattening into a vector
+# 
+# 
+# df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+#   mutate(gbm_weights = as.numeric(gbm_weights))
+
+# Find 2nd and 98th percentile cutoffs
+#lower_cap <- quantile(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights, 0.0175, na.rm = TRUE)
+upper_cap <- quantile(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights, 0.9825, na.rm = TRUE)
+
+# Apply lower and upper caps
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(gbm_weights = ifelse(gbm_weights > upper_cap, upper_cap, gbm_weights)
+         #,gbm_weights = ifelse(gbm_weights < lower_cap, lower_cap, gbm_weights)
+         )
+
+summary(df_wk_hospital_closures_combined_CS_large_only_smoothed_$gbm_weights)
+```
+
+####Weighting based on Baseline Year
+
+```{r}
+library(twang)
+
+# Remove all rows where ARS_original is in the list of municipalities with NA
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed %>%
+  filter(!ARS_original %in% municipalities_with_na)
+
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  mutate(treated_unit = ifelse(year_of_closure > 0, 1, 0))  # Convert to binary 0/1
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_2008 <- df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  filter(Year == 2008)
+
+ps_model <- ps(
+  treated_unit ~ demographics_PC1 + demographics_PC2  + finance_PC1 + finance_PC2 ,
+  #+ demographics_PC3+ finance_PC3
+  data = df_wk_hospital_closures_combined_CS_large_only_smoothed_2008,
+  stop.method = "es.mean",  # Use entropy-based stopping
+  estimand = "ATE", 
+  n.trees = 15000,  # More iterations to improve fit
+  shrinkage = 0.001,  # More conservative weighting
+  trim.level = 0.01  # Trims extreme weights
+)
+
+# Extract stabilized weights
+df_wk_hospital_closures_combined_CS_large_only_smoothed_2008$gbm_weights <- ps_model$w
+plot(ps_model, plots = 1)
+#plot(ps_model, plots = 2)
+plot(ps_model, plots = 3)
+plot(ps_model, plots = 4)
+plot(ps_model, plots = 5)
+
+df_wk_hospital_closures_combined_CS_large_only_smoothed_ <-  df_wk_hospital_closures_combined_CS_large_only_smoothed_ %>%
+  left_join(df_wk_hospital_closures_combined_CS_large_only_smoothed_2008 %>%
+              dplyr::select(gbm_weights, ARS_original))
+
+```
+
+###ATT by Treatment Year
+```{r}
+# Extract the Group-Time ATT estimates
+library(ggplot2)
+library(did)
+
+# Extract Group-Time ATT estimates
+group_time_att <- data.frame(
+  group = as.factor(results$group),
+  time = results$t,
+  att = results$att,
+  se = results$se
+)
+
+# Add confidence intervals
+group_time_att <- group_time_att %>%
+  mutate(
+    ci_lower = att - 1.96 * se,
+    ci_upper = att + 1.96 * se
+  )
+
+# Plot ATT for each treatment year in a grid
+ggplot(group_time_att, aes(x = time, y = att)) +
+  geom_line() +
+  geom_point() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Group-Time ATT Estimates by Treatment Year",
+    x = "Time Periods",
+    y = "ATT (with 95% Confidence Intervals)"
+  ) +
+  theme_minimal() +
+  facet_wrap(~group, scales = "free_y", ncol = 2) +  # Adjust ncol for grid layout
+  theme(strip.text = element_text(size = 10, face = "bold"))
+
+```
+
+###Group-Time ATT Estimates by Demographic Type
+```{r}
+df_wk_hospital_closures_combined_CS_slides <- df_wk_hospital_closures_combined_CS %>%
+  group_by(ARS_original) %>%
+  mutate(
+    employment_level_female_smoothed = rollmean(employment_level_female, k = 3, fill = NA, align = "center"),
+    employment_level_smoothed = rollmean(employment_level, k = 3, fill = NA, align = "center"),
+    demographic_type_simplified = case_when(
+    Demografietyp %in% c("Typ 1", "Typ 2", "Typ 3") ~ "Aging & Shrinking Municipalities",
+    Demografietyp %in% c("Typ 4", "Typ 5", "Typ 9") ~ "Stable & Rural Growth Centers",
+    Demografietyp %in% c("Typ 6", "Typ 7") ~ "Struggling Urban Centers",
+    Demografietyp %in% c("Typ 8", "Typ 10", "Typ 11") ~ "Affluent & Growing Regions",
+    TRUE ~ NA_character_  # Handle unexpected values
+  ))
+
+# Run the Callaway & Sant'Anna method with covariation demografic type
+results_matching <- att_gt(
+  yname = "employment_level_smoothed",        # Outcome variable
+  tname = "Year", # Time variable
+  xformla = ~ demographic_type_simplified,
+  idname = "ARS_original",                 # Unit identifier
+  gname = "year_of_closure",               # Treatment timing
+  data = df_wk_hospital_closures_combined_CS_slides, # Dataset
+  control_group = "notyettreated"          # Comparison group
+)
+
+# Summarize and analyze the results
+summary(results_matching)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect <- aggte(results_matching, type = "dynamic", na.rm = TRUE)
+
+# Summarize the dynamic effects
+summary(dynamic_effect)
+
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+dynamic_data <- data.frame(
+  time_periods = dynamic_effect$egt,       # Relative time periods
+  estimate = dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect$att.egt - 1.96 * dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect$att.egt + 1.96 * dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, Estimates with Demographic Type as Covariate)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_x_continuous(limits = c(min(dynamic_data$time_periods), 7)) +
+  theme_minimal()
+
+```
+
+
+
+### Dynamic Group-Time ATT Estimates Matched by Demographic Type
+```{r}
+df_wk_hospital_closures_combined_CS_match <- df_wk_hospital_closures_combined_CS %>%
+  filter(!is.na(Demografietyp))
+
+library(MatchIt)
+psm_model <- matchit(
+  formula = treated_unit ~ Demografietyp,  # Treatment ~ Covariates
+  data = df_wk_hospital_closures_combined_CS_match,
+  method = "nearest",                        # Matching method
+  distance = "logit"                         # Propensity score method
+)
+
+matched_data <- match.data(psm_model)
+
+results_matched <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # Covariates already balanced by matching
+  data = matched_data,
+  control_group = "notyettreated"
+)
+summary(results_matched)
+
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect <- aggte(results_matched, type = "dynamic", na.rm = TRUE)
+
+# Summarize the dynamic effects
+summary(dynamic_effect)
+
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+dynamic_data <- data.frame(
+  time_periods = dynamic_effect$egt,       # Relative time periods
+  estimate = dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect$att.egt - 1.96 * dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect$att.egt + 1.96 * dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "ATT Estimates Matched by Demographic Type",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+###Interaction Model for Demographic Type
+```{r}
+# Run the Callaway & Sant'Anna method with interaction for demographic type
+results_interaction <- att_gt(
+  yname = "employment_level_female",        # Outcome variable
+  tname = "Year",                           # Time variable
+  idname = "ARS_original",                  # Unit identifier
+  gname = "year_of_closure",                 # Treatment timing
+  xformla = ~ Demografietyp * treated_unit,       # Interaction term between treatment and demographic type
+  data = df_wk_hospital_closures_combined_CS, # Dataset
+  control_group = "notyettreated"            # Comparison group
+)
+
+# Summarize and analyze the results
+summary(results_interaction)
+
+# Aggregate results (overall treatment effect)
+agg_effect_interaction <- aggte(results_interaction, type = "group", na.rm = TRUE)
+summary(agg_effect_interaction)
+
+# Extract results for visualization
+dynamic_effect_interaction <- aggte(results_interaction, type = "dynamic", na.rm = TRUE)
+
+# Prepare data for plotting
+library(ggplot2)
+
+interaction_data <- data.frame(
+  time_periods = dynamic_effect_interaction$egt,       
+  estimate = dynamic_effect_interaction$att.egt,      
+  ci_lower = dynamic_effect_interaction$att.egt - 1.96 * dynamic_effect_interaction$se.egt,  
+  ci_upper = dynamic_effect_interaction$att.egt + 1.96 * dynamic_effect_interaction$se.egt   
+)
+
+# Plot the dynamic ATT over time with interaction effects
+ggplot(interaction_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time with Interaction (Demographic Type * Treatment)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+library(did)
+
+# Run the Callaway & Sant'Anna method with stratification
+results <- att_gt(
+  yname = "employment_level_female",        # Outcome variable
+  tname = "Year",                          # Time variable
+  idname = "ARS_original",                 # Unit identifier
+  gname = "year_of_closure",                # Treatment timing
+  xformla = ~ Demografietyp,            # Covariates (e.g., rural/urban)
+  data = df_wk_hospital_closures_combined_CS_slides, # Dataset
+  control_group = "notyettreated"          # Comparison group
+)
+
+# Summarize and analyze the results
+summary(results)
+
+# Aggregate results (overall treatment effect)
+agg_effect <- aggte(results, type = "group", na.rm = TRUE)
+summary(agg_effect)
+
+```
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+
+# Extract Group-Time ATT estimates
+group_time_att_demo <- results$DIDparams$data %>%
+  dplyr::select(ARS_original, Year, Demografietyp) %>%  # Select relevant columns
+  distinct() %>%  # Remove duplicates if necessary
+  inner_join(  # Join with ATT estimates
+    data.frame(
+      time = results$t,
+      group = results$group,
+      att = results$att,
+      se = results$se
+    ),
+    by = c("Year" = "time")  # Adjust this join condition if necessary
+  ) %>%
+  mutate(
+    ci_lower = att - 1.96 * se,
+    ci_upper = att + 1.96 * se
+  )
+
+# Plot ATT for each demographic type in a grid
+ggplot(group_time_att_demo, aes(x = Year, y = att)) +
+  geom_line() +
+  geom_point() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Group-Time ATT Estimates by Demographic Type",
+    x = "Time Periods",
+    y = "ATT (with 95% Confidence Intervals)"
+  ) +
+  theme_minimal() +
+  facet_wrap(~Demografietyp, scales = "free_y", ncol = 2) +  # Adjust ncol for grid layout
+  theme(strip.text = element_text(size = 10, face = "bold"))
+
+```
+
+
+### Prepping PCA: Trimmed moving Average
+
+```{r}
+library(dplyr)
+library(zoo)
+
+# Define function for moving trimmed average
+moving_trimmed_avg <- function(x, k = 2) {
+  rollapply(x, width = 2 * k + 1, FUN = function(sub_x) {
+    sub_x <- sort(sub_x, na.last = NA)  # Sort values, ignoring NA
+    if (length(sub_x) > 4) {  # Ensure at least 4 values before trimming
+      sub_x <- sub_x[3:(length(sub_x) - 2)]  # Remove the two most extreme values
+    }
+    mean(sub_x, na.rm = TRUE)  # Compute trimmed mean
+  }, fill = NA, align = "center", partial = TRUE)  # Keep alignment
+}
+```
+
+
+### Running PCA
+
+```{r}
+library(dplyr)
+library(zoo)  # For na.approx function
+
+df_wk_hospital_closures_combined_CS_PCA <- df_wk_hospital_closures_combined_CS
+
+PCA_PVs_selected_columns_finance <- c(
+    'Einzahlungen lfd. Verwaltung (Euro je Einwohner:in)',
+    'Finanzeinzahlungen (Euro je Einwohner:in)',
+    'Finanzsaldo (Euro je Einwohner:in)',
+    'Grundsteuer B (Euro je Einwohner:in)',
+    'Umlage an Gemeindeverbände (Euro je Einwohner:in)',
+    'core_budget_debt_per_capita'
+    #'Verschuldung im Kernhaushalt (Euro je Einwohner:in)'
+)
+
+PCA_PVs_selected_columns_demographics <- c(
+    'Anteil 65- bis 79-Jährige (%)',
+    'Anteil Elternjahrgänge (%)',
+    'Anteil unter 18-Jährige (%)',
+    'Geburten (je 1.000 Einwohner:innen)',
+    'Altenquotient (ab 65-Jährige je 100 Pers. der AG 20-64)',
+    'Jugendquotient (unter 20-Jährige je 100 Pers. der AG 20-64)',
+    'Gesamtquotient (unter 20-/ab 65-Jährige je 100 Pers. der AG 20-64)',
+    'Natürlicher Saldo (je 1.000 Einwohner:innen)'
+)
+
+PCA_PVs_selected_columns_social <- c(
+ 'Einpersonen-Haushalte (%)',
+ 'Haushalte mit Kindern (%)',
+ 'Wohnfläche pro Person (m²)',
+ 'Wohnungen in Ein-/Zweifamilienhäusern (%)'
+)
+
+# Combine all selected variables into one vector
+selected_columns <- c(
+#  PCA_PVs_selected_columns_social,
+  PCA_PVs_selected_columns_finance,
+  PCA_PVs_selected_columns_demographics
+)
+
+df_wk_hospital_closures_combined_CS_PCA <- df_wk_hospital_closures_combined_CS_PCA %>%
+  group_by(ARS) %>%
+  filter(!all(across(all_of(PCA_PVs_selected_columns_finance), is.na))) %>%  
+  mutate(across(all_of(PCA_PVs_selected_columns_finance), ~ na.approx(.x, na.rm = FALSE))) %>%
+  filter(!all(across(all_of(PCA_PVs_selected_columns_demographics), is.na))) %>%  
+   mutate(across(all_of(PCA_PVs_selected_columns_demographics), ~ na.approx(.x, na.rm = FALSE))) %>%
+  # filter(!all(across(all_of(PCA_PVs_selected_columns_social), is.na))) %>%  
+  # mutate(across(all_of(PCA_PVs_selected_columns_social), ~ na.approx(.x, na.rm = FALSE))) %>%
+  #   mutate(across(all_of(PCA_PVs_selected_columns_social), ~ ifelse(is.na(.x), mean(.x, na.rm = TRUE), .x))) %>%
+  ungroup()
+
+df_wk_hospital_closures_combined_CS_PCA_comparison <- df_wk_hospital_closures_combined_CS_PCA %>%
+group_by(ARS_original) %>%  # Apply transformation within each unit
+  mutate(across(all_of(selected_columns), moving_trimmed_avg)) %>%
+  ungroup()
+
+df_wk_hospital_closures_combined_CS_PCA_finance_standardized_data <- scale(df_wk_hospital_closures_combined_CS_PCA[, PCA_PVs_selected_columns_finance])
+
+df_wk_hospital_closures_combined_CS_PCA_demographics_standardized_data <- scale(df_wk_hospital_closures_combined_CS_PCA[, PCA_PVs_selected_columns_demographics])
+
+# df_wk_hospital_closures_combined_CS_PCA_social_standardized_data <- scale(df_wk_hospital_closures_combined_CS_PCA[, PCA_PVs_selected_columns_social])
+
+pca_result_finance <- prcomp(df_wk_hospital_closures_combined_CS_PCA_finance_standardized_data, center = TRUE, scale = TRUE)
+
+pca_result_demographics <- prcomp(df_wk_hospital_closures_combined_CS_PCA_demographics_standardized_data, center = TRUE, scale = TRUE)
+
+# pca_result_social <- prcomp(df_wk_hospital_closures_combined_CS_PCA_social_standardized_data, center = TRUE, scale = TRUE)
+
+# Extract the first principal component for each PCA
+df_wk_hospital_closures_combined_CS_PCA <- df_wk_hospital_closures_combined_CS_PCA %>%
+  mutate(
+    # social_PC1 = as.numeric(pca_result_social$x[, 1]),
+    # social_PC2 = as.numeric(pca_result_social$x[, 2]),
+    # social_PC3 = as.numeric(pca_result_social$x[, 3]),
+    finance_PC1 = as.numeric(pca_result_finance$x[, 1]),
+    finance_PC2 = as.numeric(pca_result_finance$x[, 2]),
+    finance_PC3 = as.numeric(pca_result_finance$x[, 3]),
+    demographics_PC1 = as.numeric(pca_result_demographics$x[, 1]),
+    demographics_PC2 = as.numeric(pca_result_demographics$x[, 2]),
+    demographics_PC3 = as.numeric(pca_result_demographics$x[, 3])
+    )
+```
+
+### Model with interaction Modell for PCA 
+
+```{r penalized logistic regression}
+# Load required libraries
+library(dplyr)
+library(zoo)  # For na.approx function
+library(glmnet)
+
+# Running penalized logistic regression for propensity score estimation
+# Prepare data for glmnet
+X <- model.matrix(treated_unit ~ finance_PC1 + demographics_PC1, data = df_wk_hospital_closures_combined_CS_PCA)[, -1]
+y <- df_wk_hospital_closures_combined_CS_PCA$treated_unit
+
+# Fit a LASSO logistic regression (alpha = 1 for LASSO, 0 for Ridge)
+cv_fit <- cv.glmnet(X, y, family = "binomial", alpha = 0)  # Use Ridge with alpha = 0 if needed
+best_lambda <- cv_fit$lambda.min  # Select optimal lambda value
+
+# Predict propensity scores
+df_wk_hospital_closures_combined_CS_PCA$propensity_score <- predict(cv_fit, X, s = best_lambda, type = "response")
+
+# Add inverse probability weights (IPW)
+df_wk_hospital_closures_combined_CS_PCA <- df_wk_hospital_closures_combined_CS_PCA %>%
+  mutate(
+    ipw = ifelse(treated_unit == 1, 
+                 1 / propensity_score,         # Weight for treated
+                 1 / (1 - propensity_score))   # Weight for control
+  )
+
+# Summarize propensity scores
+summary(df_wk_hospital_closures_combined_CS_PCA$propensity_score)
+
+# Final dataset ready for causal inference
+head(df_wk_hospital_closures_combined_CS_PCA)
+
+```
+
+```{r}
+# Load required libraries
+library(dplyr)
+library(zoo)   # For na.approx function
+library(randomForest)
+
+# Prepare data for Random Forest
+df_rf <- df_wk_hospital_closures_combined_CS_PCA %>%
+  select(treated_unit, finance_PC1, demographics_PC1) %>%
+  na.omit()  # Remove any rows with missing values to avoid errors in randomForest
+
+# Fit a Random Forest model for propensity score estimation
+rf_model <- randomForest(
+  factor(treated_unit) ~ finance_PC1 + demographics_PC1, 
+  data = df_rf, 
+  ntree = 500,        # Number of trees
+  mtry = 2,           # Number of variables randomly sampled at each split
+  importance = TRUE,  # Measure variable importance
+  na.action = na.omit # Handle missing values
+)
+
+# Predict propensity scores using Random Forest model
+df_wk_hospital_closures_combined_CS_PCA$propensity_score_rf <- predict(rf_model, df_wk_hospital_closures_combined_CS_PCA, type = "prob")[, 2]
+
+# Add inverse probability weights (IPW)
+df_wk_hospital_closures_combined_CS_PCA <- df_wk_hospital_closures_combined_CS_PCA %>%
+  mutate(
+    ipw_rf = ifelse(treated_unit == 1, 
+                 1 / propensity_score_rf,         # Weight for treated
+                 1 / (1 - propensity_score_rf))   # Weight for control
+  )
+
+# Summarize propensity scores
+summary(df_wk_hospital_closures_combined_CS_PCA$propensity_score_rf)
+
+# Check variable importance
+importance(rf_model)
+varImpPlot(rf_model)  # Visualize variable importance
+
+# Final dataset ready for causal inference
+head(df_wk_hospital_closures_combined_CS_PCA)
+
+```
+
+
+```{r}
+library(did)
+
+# Run the Callaway & Sant'Anna method with IPW
+results_ipw <- att_gt(
+  yname = "employment_level_female",  # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Treatment timing
+  xformla = NULL,                        # No additional covariates needed (accounted for by IPW)
+  data = df_wk_hospital_closures_combined_CS_PCA, # Dataset with IPW
+  control_group = "notyettreated",       # Comparison group
+  weightsname = "ipw"                     # Use the calculated inverse probability weights
+)
+
+# Summarize the DiD results
+summary(results_ipw)
+
+# Aggregate the ATT effects across groups and time
+agg_effect_ipw <- aggte(results_ipw, type = "dynamic", na.rm = TRUE)
+
+# Summarize the aggregated effects
+summary(agg_effect_ipw)
+
+library(ggplot2)
+
+# Prepare data for visualization
+dynamic_data_ipw <- data.frame(
+  time_periods = agg_effect_ipw$egt,    # Relative time periods
+  estimate = agg_effect_ipw$att.egt,   # ATT estimates
+  ci_lower = agg_effect_ipw$att.egt - 1.96 * agg_effect_ipw$se.egt,  # Lower bound of 95% CI
+  ci_upper = agg_effect_ipw$att.egt + 1.96 * agg_effect_ipw$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data_ipw, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (IPW Adjustment)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+```
+
+```{r}
+results_ipw_interaction <- att_gt(
+  yname = "employment_level",  # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Treatment timing
+  xformla = ~ finance_PC1 + demographics_PC1, #* pca_result_social,  # Interaction terms
+  data = df_wk_hospital_closures_combined_CS_PCA, # Dataset with IPW
+  control_group = "notyettreated",       # Comparison group
+  weightsname = "ipw_rf"                     # Use the calculated inverse probability weights
+)
+
+# Summarize the interaction effects results
+summary(results_ipw_interaction)
+
+# Aggregate the ATT effects across groups and time
+agg_effect_ipw_interaction <- aggte(results_ipw_interaction, type = "dynamic", na.rm = TRUE)
+
+# Summarize the aggregated effects
+summary(agg_effect_ipw_interaction)
+
+library(ggplot2)
+
+# Prepare data for visualization
+dynamic_data_ipw_interaction <- data.frame(
+  time_periods = agg_effect_ipw_interaction$egt,    # Relative time periods
+  estimate = agg_effect_ipw_interaction$att.egt,   # ATT estimates
+  ci_lower = agg_effect_ipw_interaction$att.egt - 1.96 * agg_effect_ipw_interaction$se.egt,  # Lower bound of 95% CI
+  ci_upper = agg_effect_ipw_interaction$att.egt + 1.96 * agg_effect_ipw_interaction$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data_ipw_interaction, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (IPW Adjustment)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+```
+
+
+```{r}
+library(did)
+library(dplyr)
+library(ggplot2)
+
+
+df_wk_hospital_closures_combined_CS_PCA$ARS_original <- df_wk_hospital_closures_combined_CS_PCA$ARS_original %>%
+  as.numeric()
+
+# Run the Callaway & Sant'Anna method with interaction terms for the PCAs
+results_pca_interaction <- att_gt(
+  yname = "employment_level_female",#"employment_level",  # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",            # Unit identifier
+  gname = "year_of_closure",           # Treatment timing
+  xformla = ~ finance_PC1 + demographics_PC1,  # Interaction of PCAs
+  data = df_wk_hospital_closures_combined_CS_PCA  # Processed dataset with PCAs
+  #control_group = "notyettreated"      # Control group specification
+  #est_method = "ipw"
+)
+
+# Summarize the results
+summary(results_pca_interaction)
+
+# Aggregate results (overall treatment effect)
+agg_effect_pca_interaction <- aggte(results_pca_interaction, type = "group", na.rm = TRUE)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect_pca_interaction <- aggte(results_pca_interaction, type = "dynamic", na.rm = TRUE)
+summary(dynamic_effect_pca_interaction)
+
+# Extract the dynamic ATT results for plotting
+dynamic_data_pca_interaction <- data.frame(
+  time_periods = dynamic_effect_pca_interaction$egt,       # Relative time periods
+  estimate = dynamic_effect_pca_interaction$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect_pca_interaction$att.egt - 1.96 * dynamic_effect_pca_interaction$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect_pca_interaction$att.egt + 1.96 * dynamic_effect_pca_interaction$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time with interaction effects
+ggplot(dynamic_data_pca_interaction, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0,           # Add vertical line at x = 0
+             linetype = "dashed",       # Set line type (e.g., dashed, dotted)
+             size = 1) +              # Set line thickness
+  labs(
+    title = "Dynamic ATT Over Time (PCA Interaction Model)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+
+### Dynamic Group-Time ATT Estimates Matched by PCAs
+
+```{r}
+df_wk_hospital_closures_combined_CS_match <- df_wk_hospital_closures_combined_CS_PCA 
+
+library(MatchIt)
+psm_model <- matchit(
+  formula = treated_unit ~ pca_result_social + pca_result_finance + pca_result_demographics,  # Treatment ~ Covariates
+  data = df_wk_hospital_closures_combined_CS_match,
+  method = "nearest",                        # Matching method
+  distance = "logit"                         # Propensity score method
+)
+
+matched_data <- match.data(psm_model)
+
+results_matched <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # Covariates already balanced by matching
+  data = matched_data,
+  control_group = "notyettreated"
+)
+summary(results_matched)
+
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect <- aggte(results_matched, type = "dynamic", na.rm = TRUE)
+
+# Summarize the dynamic effects
+summary(dynamic_effect)
+
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+dynamic_data <- data.frame(
+  time_periods = dynamic_effect$egt,       # Relative time periods
+  estimate = dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect$att.egt - 1.96 * dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect$att.egt + 1.96 * dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "ATT Estimates Matched by PCAs",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r ALTERNATIVE VERSION}
+library(MASS)
+
+# Estimate propensity scores using logistic regression
+ps_model <- glm(treated_unit ~ pca_result_social + pca_result_finance + pca_result_demographics, 
+                data = df_wk_hospital_closures_combined_CS_match, 
+                family = binomial)
+
+
+
+# Extract predicted probabilities (propensity scores)
+df_wk_hospital_closures_combined_CS_match$propensity_score <- predict(ps_model, type = "response")
+
+df_wk_hospital_closures_combined_CS_match <- df_wk_hospital_closures_combined_CS_match %>%
+  mutate(
+    ipw = ifelse(treated_unit == 1, 
+                 1 / propensity_score,         # Weight for treated units
+                 1 / (1 - propensity_score))   # Weight for control units
+  )
+
+results_ipw <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # No need to include covariates, they are accounted for in weights
+  data = df_wk_hospital_closures_combined_CS_match,
+  control_group = "notyettreated",
+  weightsname = "ipw"
+)
+
+# Summarize results
+summary(results_ipw)
+
+```
+
+```{r}
+dynamic_effect_ipw <- aggte(results_ipw, type = "dynamic", na.rm = TRUE)
+
+dynamic_data_ipw <- data.frame(
+  time_periods = dynamic_effect_ipw$egt,       
+  estimate = dynamic_effect_ipw$att.egt,      
+  ci_lower = dynamic_effect_ipw$att.egt - 1.96 * dynamic_effect_ipw$se.egt,  
+  ci_upper = dynamic_effect_ipw$att.egt + 1.96 * dynamic_effect_ipw$se.egt   
+)
+
+ggplot(dynamic_data_ipw, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (with IPW)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r PCA BASED}
+library(MatchIt)
+
+# Perform nearest neighbor matching
+psm_model <- matchit(
+  treated_unit ~ pca_result_social + pca_result_finance + pca_result_demographics,  
+  data = df_wk_hospital_closures_combined_CS_match,
+  method = "nearest",                       
+  distance = "logit"                         
+)
+
+# Extract matched data
+matched_data <- match.data(psm_model)
+
+# Fit a logistic regression model to estimate propensity scores
+ps_model <- glm(treated_unit ~ pca_result_social + pca_result_finance + pca_result_demographics, 
+                data = matched_data, 
+                family = binomial)
+
+# Predict propensity scores
+matched_data$propensity_score <- predict(ps_model, type = "response")
+
+matched_data <- matched_data %>%
+  mutate(
+    ipw = ifelse(treated_unit == 1, 
+                 1 / propensity_score,         
+                 1 / (1 - propensity_score))   
+  )
+
+results_psm_ipw <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # Covariates already accounted for
+  data = matched_data,
+  control_group = "notyettreated",
+  weightsname = "ipw"
+)
+
+# Summarize results
+summary(results_psm_ipw)
+
+dynamic_effect_psm_ipw <- aggte(results_psm_ipw, type = "dynamic", na.rm = TRUE)
+
+dynamic_data_psm_ipw <- data.frame(
+  time_periods = dynamic_effect_psm_ipw$egt,       
+  estimate = dynamic_effect_psm_ipw$att.egt,      
+  ci_lower = dynamic_effect_psm_ipw$att.egt - 1.96 * dynamic_effect_psm_ipw$se.egt,  
+  ci_upper = dynamic_effect_psm_ipw$att.egt + 1.96 * dynamic_effect_psm_ipw$se.egt   
+)
+
+ggplot(dynamic_data_psm_ipw, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (PSM + IPW)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+```{r}
+library(MatchIt)
+
+# Perform nearest neighbor matching
+psm_model <- matchit(
+  treated_unit ~ 
+    `Einzahlungen lfd. Verwaltung (Euro je Einwohner:in)` +
+    `Finanzeinzahlungen (Euro je Einwohner:in)` +
+    `Finanzsaldo (Euro je Einwohner:in)` +
+    `Grundsteuer B (Euro je Einwohner:in)` +
+    `Umlage an Gemeindeverbände (Euro je Einwohner:in)` +
+    `Verschuldung im Kernhaushalt (Euro je Einwohner:in)` +
+    `Anteil 65- bis 79-Jährige (%)` +
+    `Anteil Elternjahrgänge (%)` +
+    `Anteil unter 18-Jährige (%)` +
+    `Geburten (je 1.000 Einwohner:innen)` +
+    `Altenquotient (ab 65-Jährige je 100 Pers. der AG 20-64)` +
+    `Jugendquotient (unter 20-Jährige je 100 Pers. der AG 20-64)` +
+    `Gesamtquotient (unter 20-/ab 65-Jährige je 100 Pers. der AG 20-64)` +
+    `Natürlicher Saldo (je 1.000 Einwohner:innen)` +
+    `Einpersonen-Haushalte (%)` +
+    `Haushalte mit Kindern (%)` +
+    `Wohnfläche pro Person (m²)` +
+    `Wohnungen in Ein-/Zweifamilienhäusern (%)`,  
+  data = df_wk_hospital_closures_combined_CS_match,
+  method = "nearest",                       
+  distance = "logit"                         
+)
+
+# Extract matched data
+matched_data <- match.data(psm_model)
+
+# Fit a logistic regression model to estimate propensity scores
+ps_model <- glm(
+  treated_unit ~ 
+        `Einzahlungen lfd. Verwaltung (Euro je Einwohner:in)` +
+    `Finanzeinzahlungen (Euro je Einwohner:in)` +
+    `Finanzsaldo (Euro je Einwohner:in)` +
+    `Grundsteuer B (Euro je Einwohner:in)` +
+    `Umlage an Gemeindeverbände (Euro je Einwohner:in)` +
+    `Verschuldung im Kernhaushalt (Euro je Einwohner:in)` +
+    `Anteil 65- bis 79-Jährige (%)` +
+    `Anteil Elternjahrgänge (%)` +
+    `Anteil unter 18-Jährige (%)` +
+    `Geburten (je 1.000 Einwohner:innen)` +
+    `Altenquotient (ab 65-Jährige je 100 Pers. der AG 20-64)` +
+    `Jugendquotient (unter 20-Jährige je 100 Pers. der AG 20-64)` +
+    `Gesamtquotient (unter 20-/ab 65-Jährige je 100 Pers. der AG 20-64)` +
+    `Natürlicher Saldo (je 1.000 Einwohner:innen)` +
+    `Einpersonen-Haushalte (%)` +
+    `Haushalte mit Kindern (%)` +
+    `Wohnfläche pro Person (m²)` +
+    `Wohnungen in Ein-/Zweifamilienhäusern (%)`, 
+                data = matched_data, 
+                family = binomial)
+
+# Predict propensity scores
+matched_data$propensity_score <- predict(ps_model, type = "response")
+
+matched_data <- matched_data %>%
+  mutate(
+    ipw = ifelse(treated_unit == 1, 
+                 1 / propensity_score,         
+                 1 / (1 - propensity_score))   
+  )
+
+results_psm_ipw <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # Covariates already accounted for
+  data = matched_data,
+  control_group = "notyettreated",
+  weightsname = "ipw"
+)
+
+# Summarize results
+summary(results_psm_ipw)
+
+dynamic_effect_psm_ipw <- aggte(results_psm_ipw, type = "dynamic", na.rm = TRUE)
+
+dynamic_data_psm_ipw <- data.frame(
+  time_periods = dynamic_effect_psm_ipw$egt,       
+  estimate = dynamic_effect_psm_ipw$att.egt,      
+  ci_lower = dynamic_effect_psm_ipw$att.egt - 1.96 * dynamic_effect_psm_ipw$se.egt,  
+  ci_upper = dynamic_effect_psm_ipw$att.egt + 1.96 * dynamic_effect_psm_ipw$se.egt   
+)
+
+ggplot(dynamic_data_psm_ipw, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (PSM + IPW)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+###Group-Time ATT Estimates by PCA
+```{r}
+# Run the Callaway & Sant'Anna method with covariation demografic type
+results_matching <- att_gt(
+  yname = "employment_level_female",        # Outcome variable
+  tname = "Year", # Time variable
+  xformla = ~  
+    #pca_result_social +
+    pca_result_finance #+ 
+    #pca_result_demographics
+  ,
+  idname = "ARS_original",                 # Unit identifier
+  gname = "year_of_closure",               # Treatment timing
+  data = df_wk_hospital_closures_combined_CS_PCA, # Dataset
+  control_group = "notyettreated"          # Comparison group
+)
+
+# Summarize and analyze the results
+summary(results_matching)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect <- aggte(results_matching, type = "dynamic", na.rm = TRUE)
+
+# Summarize the dynamic effects
+summary(dynamic_effect)
+
+# Extract the dynamic ATT results for plotting
+library(ggplot2)
+
+dynamic_data <- data.frame(
+  time_periods = dynamic_effect$egt,       # Relative time periods
+  estimate = dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect$att.egt - 1.96 * dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect$att.egt + 1.96 * dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(dynamic_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, Estimates with PCA values as Covariate)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+
+
+```{r}
+library(dplyr)
+library(MatchIt)
+
+# Combine all selected columns into one list for easier handling
+matching_covariates <- c(PCA_PVs_selected_columns_social, 
+                         PCA_PVs_selected_columns_demographics, 
+                         PCA_PVs_selected_columns_finance)
+
+# Ensure the data does not have missing values for the selected columns
+df_wk_hospital_closures_combined_CS_match <- df_wk_hospital_closures_combined_CS_PCA %>%
+  filter(complete.cases(select(., all_of(matching_covariates))))
+
+# Perform Propensity Score Matching using the original variables
+psm_model_original <- matchit(
+  formula = treated_unit ~ .,  
+  data = df_wk_hospital_closures_combined_CS_match %>% select(all_of(matching_covariates), treated_unit),
+  method = "nearest",  # Nearest neighbor matching
+  distance = "logit"   # Propensity score estimated using logistic regression
+)
+
+# Extract matched data
+matched_data_original <- match.data(psm_model_original) %>%
+  left_join(df_wk_hospital_closures_combined_CS_match %>%
+              select(ARS_original, Year, year_of_closure, employment_level_female),
+            by = "ARS_original")
+
+# Run the Callaway & Sant'Anna DID model on the matched data
+results_matched_original <- att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  xformla = NULL,  # Covariates already balanced by matching
+  data = matched_data_original,
+  control_group = "notyettreated"
+)
+
+# Summarize and analyze the results
+summary(results_matched_original)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+dynamic_effect_original <- aggte(results_matched_original, type = "dynamic", na.rm = TRUE)
+
+# Summarize the dynamic effects
+summary(dynamic_effect_original)
+
+# Extract the dynamic ATT results for plotting
+dynamic_data_original <- data.frame(
+  time_periods = dynamic_effect_original$egt,       # Relative time periods
+  estimate = dynamic_effect_original$att.egt,      # ATT estimates
+  ci_lower = dynamic_effect_original$att.egt - 1.96 * dynamic_effect_original$se.egt,  # Lower bound of 95% CI
+  ci_upper = dynamic_effect_original$att.egt + 1.96 * dynamic_effect_original$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+library(ggplot2)
+
+ggplot(dynamic_data_original, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Matched on Original Variables)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+

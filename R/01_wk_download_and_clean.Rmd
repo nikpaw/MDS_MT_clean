@@ -1,0 +1,215 @@
+---
+title: "wegweiserkommune_download_and_clean"
+author: "Niklas Pawelzik"
+date: "2024-10-22"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Setup
+
+```{r}
+# Packages are loaded from the external "00_load_packages.R" script
+source(here::here("R", "00_load_packages.R"))
+```
+
+```{r}
+# Define folder paths
+path_raw_wk       <- here::here("data", "raw", "wk_data")
+path_processed_wk <- here::here("data", "processed", "wk_data")
+
+# Create directories if needed
+fs::dir_create(path_raw_wk)
+fs::dir_create(path_processed_wk)
+
+```
+
+
+```{r}
+# Save and clean CSV file from GET request
+download_and_clean_csv <- function(url, raw_filename, clean_filename, skip_lines = 3) {
+  response <- httr::GET(url)
+  if (httr::status_code(response) == 200) {
+    raw_path <- fs::path(path_raw_wk, raw_filename)
+    clean_path <- fs::path(path_processed_wk, clean_filename)
+    
+    writeBin(httr::content(response, "raw"), raw_path)
+    raw_lines <- readr::read_lines(raw_path)
+    clean_lines <- raw_lines[-seq_len(skip_lines)]
+    readr::write_lines(clean_lines, clean_path)
+    
+    df <- readr::read_delim(
+      file = clean_path,
+      delim = ";",
+      col_types = readr::cols(.default = readr::col_character()),
+      locale = readr::locale(encoding = "UTF-8"),
+      skip_empty_rows = TRUE
+    )
+    return(df)
+  } else {
+    stop(paste("Download failed:", httr::status_code(response)))
+  }
+}
+
+```
+
+# Data Download & First Cleaning
+
+## Employment data
+```{r}
+wk_employment_url <- "https://www.wegweiser-kommune.de/data-api/rest/export/beschaeftigung-arbeitsmarkt+gemeinden+2006-2022+tabelle.csv?charset=UTF-8"
+df_wk_employment_raw <- download_and_clean_csv(
+  url = wk_employment_url,
+  raw_filename = "wk_employment_raw.csv",
+  clean_filename = "wk_employment_clean.csv"
+)
+```
+
+## Finance
+```{r}
+wk_finance_url <- "https://www.wegweiser-kommune.de/data-api/rest/export/finanzen+gemeinden+2006-2022+tabelle.csv?charset=UTF-8"
+df_wk_finance_raw <- download_and_clean_csv(
+  url = wk_finance_url,
+  raw_filename = "wk_finance_raw.csv",
+  clean_filename = "wk_finance_clean.csv"
+)
+```
+
+## Training
+```{r}
+wk_training_url <- "https://www.wegweiser-kommune.de/data-api/rest/export/aus-und-weiterbildung+gemeinden+2006-2022+tabelle.csv?charset=UTF-8"
+df_wk_training_raw <- download_and_clean_csv(
+  url = wk_training_url,
+  raw_filename = "wk_training_raw.csv",
+  clean_filename = "wk_training_clean.csv",
+  skip_lines = 6
+)
+```
+
+## Demographics
+```{r}
+wk_demographics_url <- "https://www.wegweiser-kommune.de/data-api/rest/export/demografische-entwicklung+gemeinden+2006-2022+tabelle.csv?charset=UTF-8"
+df_wk_demographics_raw <- download_and_clean_csv(
+  url = wk_demographics_url,
+  raw_filename = "wk_demographics_raw.csv",
+  clean_filename = "wk_demographics_clean.csv"
+)
+```
+
+## Social Indicators
+```{r}
+wk_social_url <- "https://www.wegweiser-kommune.de/data-api/rest/export/soziale-lage+gemeinden+2006-2022+tabelle.csv?charset=UTF-8"
+df_wk_social_raw <- download_and_clean_csv(
+  url = wk_social_url,
+  raw_filename = "wk_social_raw.csv",
+  clean_filename = "wk_social_clean.csv"
+)
+```
+
+# Cleaning and Transforming
+
+## Long Format 
+```{r}
+process_wk_dataset_long <- function(df) {
+  # Identify all year columns (e.g., "2006", "2007", ...)
+  year_columns <- grep("^[0-9]{4}", names(df), value = TRUE)
+
+  # Ensure all year columns are character
+  df[year_columns] <- lapply(df[year_columns], as.character)
+
+  # Reshape to long format
+  df_long <- df %>%
+    tidyr::pivot_longer(
+      cols = tidyselect::all_of(year_columns),
+      names_to = "year_statistic",
+      values_to = "value"
+    ) %>%
+    tidyr::separate(
+      col = year_statistic,
+      into = c("year", "statistic"),
+      sep = "\n"
+    )
+
+  # Convert "k.A." (not available) to NA
+  df_long[df_long == "k.A."] <- NA
+
+  # Remove rows that have no key information
+  df_long <- df_long %>%
+    dplyr::filter(
+      !(is.na(Kommune) & is.na(GKZ) & is.na(ARS) & is.na(Bundesland) & is.na(Landkreis) & is.na(Demografietyp))
+    )
+
+  # Clean value column
+  df_long <- df_long %>%
+    dplyr::mutate(
+      value = gsub("\\.(?=[0-9]{3}(,|$))", "", value, perl = TRUE),  # Remove thousands separator
+      value = gsub(",", ".", value),  # Decimal conversion
+      value = gsub("[^0-9.-]", "", value),  # Remove all non-numeric characters
+      value = as.numeric(value)
+    )
+
+  return(df_long)
+}
+```
+
+```{r}
+# Apply to all raw dataframes and assign to new tidy versions
+df_wk_employment_long    <- process_wk_dataset_long(df_wk_employment_raw)
+df_wk_finance_long       <- process_wk_dataset_long(df_wk_finance_raw)
+df_wk_training_long      <- process_wk_dataset_long(df_wk_training_raw)
+df_wk_demographics_long  <- process_wk_dataset_long(df_wk_demographics_raw)
+df_wk_social_long        <- process_wk_dataset_long(df_wk_social_raw)
+```
+
+## Wide Format
+```{r}
+# Convert a WK dataset from long to wide format
+convert_wk_long_to_wide <- function(df_long) {
+  df_long %>%
+    tidyr::pivot_wider(
+      names_from = statistic,
+      values_from = value
+    )
+}
+
+```
+
+```{r}
+# Apply wide transformation
+df_wk_employment_wide    <- convert_wk_long_to_wide(df_wk_employment_long)
+df_wk_finance_wide       <- convert_wk_long_to_wide(df_wk_finance_long)
+df_wk_training_wide      <- convert_wk_long_to_wide(df_wk_training_long)
+df_wk_demographics_wide  <- convert_wk_long_to_wide(df_wk_demographics_long)
+df_wk_social_wide        <- convert_wk_long_to_wide(df_wk_social_long)
+
+```
+
+## Export Long and Wide to Processed Folder
+```{r}
+# Define save helper
+save_wk_processed <- function(data, filename) {
+  readr::write_csv(
+    x = data,
+    file = fs::path(path_processed_wk, filename)
+  )
+}
+
+# Save long format files
+save_wk_processed(df_wk_employment_long,    "wk_employment_long.csv")
+save_wk_processed(df_wk_finance_long,       "wk_finance_long.csv")
+save_wk_processed(df_wk_training_long,      "wk_training_long.csv")
+save_wk_processed(df_wk_demographics_long,  "wk_demographics_long.csv")
+save_wk_processed(df_wk_social_long,        "wk_social_long.csv")
+
+# Save wide format files
+save_wk_processed(df_wk_employment_wide,    "wk_employment_wide.csv")
+save_wk_processed(df_wk_finance_wide,       "wk_finance_wide.csv")
+save_wk_processed(df_wk_training_wide,      "wk_training_wide.csv")
+save_wk_processed(df_wk_demographics_wide,  "wk_demographics_wide.csv")
+save_wk_processed(df_wk_social_wide,        "wk_social_wide.csv")
+
+```

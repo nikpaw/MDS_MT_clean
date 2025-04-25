@@ -1,0 +1,1011 @@
+---
+title: "model_spillover"
+author: "Niklas Pawelzik"
+date: "2025-01-22"
+output: html_document
+---
+follows after model_basic_PCA and model_synthdid
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+```{r}
+ggplot(data = shp_flächen_ebene_verwaltungsgemeinschaft_enriched) +
+  geom_sf(aes(fill = treated_unit)) + # Use "treated_unit" to define fill colors
+  theme_minimal() +
+  labs(
+    title = "Gemeinden in Deutschland: Treated Units",
+    fill = "Treated Unit" # Legend title
+  )
+```
+# Define Neighboring Districts (Adjacency)
+## Based on Geographic Adjacency
+
+###Preparing data, creating neighbors column
+```{r}
+library(spdep)
+
+nb <- poly2nb(shp_flächen_ebene_verwaltungsgemeinschaft_enriched, queen = TRUE)
+
+df_prep_spillover <- shp_flächen_ebene_verwaltungsgemeinschaft_enriched
+
+# Convert to adjacency matrix
+adjacency_matrix <- nb2mat(nb, style = "B", zero.policy = TRUE)
+
+# Assign neighboring units for each ASR
+df_prep_spillover$neighbors <- sapply(1:nrow(adjacency_matrix), function(i) {
+  which(adjacency_matrix[i, ] == 1)
+})
+```
+
+```{r}
+library(dplyr)
+library(purrr)
+
+df_prep_spillover_2 <- df_prep_spillover %>%
+  mutate(
+    spillover_unit = map_lgl(neighbors, ~ any(df_prep_spillover$treated_unit[.x] == 1))
+  ) %>%
+  mutate(
+    treatment_status_spillover = case_when(
+      spillover_unit == TRUE ~ "spillover",
+      treated_unit == 1 ~ "direct_treated",
+      TRUE ~ "control"
+    )
+  )
+
+df_prep_spillover_2 <- df_prep_spillover_2 %>%
+  mutate(
+    treatment_status_spillover = 
+      ifelse(is.na(treated_unit), NA, treatment_status_spillover)
+  )%>%
+  mutate(
+    spillover_unit = 
+      ifelse(treated_unit == TRUE, FALSE, spillover_unit)
+  ) %>%
+  mutate(
+    treatment_status_spillover = 
+      ifelse(treated_unit == TRUE, "direct_treated", treatment_status_spillover)
+  )
+
+table(df_prep_spillover_2$treatment_status)
+
+```
+
+
+```{r}
+ggplot(data = df_prep_spillover_2) +
+  geom_sf(aes(fill = treatment_status_spillover)) + # Use "treated_unit" to define fill colors
+  theme_minimal() +
+  labs(
+    title = "Gemeinden in Deutschland: Treated Units and Their Neighbors",
+    fill = "Treated Unit, Neighbors and Control" # Legend title
+  )
+```
+
+
+```{r}
+# Ensure neighbors are stored as a list of indexes
+df_prep_spillover_2 <- df_prep_spillover_2 %>%
+  mutate(
+    neighbor_closure_year = sapply(1:nrow(.), function(i) {
+      # Extract closure years of neighboring units
+      neighbor_indices <- neighbors[[i]]
+      if (length(neighbor_indices) > 0) {
+        min(year_of_closure[neighbor_indices], na.rm = TRUE)
+      } else {
+        NA  # No neighbors
+      }
+    })
+  )
+
+# Convert neighbor_closure_year to numeric (handling NAs)
+df_prep_spillover_2$neighbor_closure_year <- as.numeric(df_prep_spillover_2$neighbor_closure_year)
+
+# # Mark spillover units where neighbors had closures
+# df_prep_spillover_2 <- df_prep_spillover_2 %>%
+#   mutate(spillover_unit = ifelse(!is.na(neighbor_closure_year), 1, 0))
+```
+
+```{r}
+df_prep_spillover_2$ARS_original <- as.numeric(df_prep_spillover_2$ARS_original)
+
+# Perform a inner join
+df_prep_spillover_3 <- df_wk_hospital_closures_combined_CS  %>%
+  inner_join(
+    df_prep_spillover_2 %>%
+      dplyr::select(ARS_original, Year, treatment_status_spillover, spillover_unit, neighbor_closure_year), # Select relevant columns
+    by = c("ARS_original", "Year") # Match based on ARS
+  ) %>%
+  mutate(
+    spillover_unit = 
+      ifelse(treated_unit == TRUE, FALSE, spillover_unit),
+    treatment_status_spillover = 
+      ifelse(treated_unit == TRUE, "direct_treated", treatment_status_spillover)
+  )
+```
+
+###Model excluding Spillover Units 
+```{r}
+df_prep_spillover_2$ARS_original <- as.numeric(df_prep_spillover_2$ARS_original)
+
+CS_direct_treatment_results <- att_gt(
+  yname = "employment_level",         # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Direct treatment timing
+  data = df_prep_spillover_3 %>% filter(!spillover_unit == TRUE),  # Exclude spillovers
+#  xformla = ~ Demografietyp,
+#  xformla = ~ population_density_baseline_year + income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year,
+control_group = "notyettreated"      # Compare to untreated controls
+)
+
+summary(CS_direct_treatment_results)
+
+# Aggregate dynamic effects
+CS_direct_dynamic_effect <- aggte(
+  CS_direct_treatment_results,
+  type = "dynamic",
+  na.rm = TRUE,
+#  min_e = 0,       # Start at year 0 (treatment year)
+  max_e = 8
+  )
+
+summary(CS_direct_dynamic_effect)
+```
+
+```{r}
+# View unique values in the column
+unique_years <- unique(df_prep_spillover_3$year_of_closure)
+print(unique_years)
+
+# View a summary of value counts
+year_counts <- table(df_prep_spillover_3$year_of_closure)
+print(year_counts)
+
+# Check for missing values
+missing_years <- sum(is.na(df_prep_spillover_3$year_of_closure))
+cat("Missing values in year_of_closure:", missing_years, "\n")
+
+# Display first few rows of the column
+head(df_prep_spillover_3$year_of_closure)
+
+# Describe statistics if column is numeric
+if (is.numeric(df_prep_spillover_3$year_of_closure)) {
+  summary(df_prep_spillover_3$year_of_closure)
+}
+
+
+```
+
+
+###Model for Spillover Units 
+```{r}
+CS_spillover_results <- att_gt(
+  yname = "employment_level",         # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "neighbor_closure_year",            # Direct treatment timing
+  data = df_prep_spillover_3 %>% filter(treated_unit == FALSE),  # Exclude treated units
+#  xformla = ~ Demografietyp,
+  xformla = ~ population_density_baseline_year + income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year,
+  control_group = "notyettreated"      # Compare to untreated controls
+)
+
+summary(CS_spillover_results)
+
+# Aggregate dynamic effects
+CS_spillover_dynamic_effect <- aggte(
+  CS_spillover_results, 
+  type = "dynamic", 
+  na.rm = TRUE,
+  min_e = 0,       # Start at year 0 (treatment year)
+  max_e = 5
+  )
+summary(CS_spillover_dynamic_effect)
+
+```
+
+
+###Comparing Spillover Units to Treated Units
+```{r}
+# Create a summary table
+compare_effects <- data.frame(
+  Model = c("Effect Direct Treatment", "Effect Direct Treatment without Spillover Units", "Spillover Effect"),
+  ATT = c(CS_agg_effect_years_cap$overall.att, CS_direct_dynamic_effect$overall.att, CS_spillover_dynamic_effect$overall.att),
+  Std_Error = c(CS_agg_effect_years_cap$overall.se, CS_direct_dynamic_effect$overall.se, CS_spillover_dynamic_effect$overall.se),
+  CI_Lower = c(CS_agg_effect_years_cap$overall.att - 1.96 * CS_agg_effect_years_cap$overall.se, CS_direct_dynamic_effect$overall.att - 1.96 * CS_direct_dynamic_effect$overall.se,
+               CS_spillover_dynamic_effect$overall.att - 1.96 * CS_spillover_dynamic_effect$overall.se),
+  CI_Upper = c(CS_agg_effect_years_cap$overall.att + 1.96 * CS_agg_effect_years_cap$overall.se, CS_direct_dynamic_effect$overall.att + 1.96 * CS_direct_dynamic_effect$overall.se,
+               CS_spillover_dynamic_effect$overall.att + 1.96 * CS_spillover_dynamic_effect$overall.se)
+)
+
+print(compare_effects)
+```
+
+```{r}
+# Aggregate dynamic effects
+CS_spillover_dynamic_effect <- aggte(
+  CS_spillover_results, 
+  type = "dynamic", 
+  na.rm = TRUE,
+#  min_e = 0,       # Start at year 0 (treatment year)
+#  max_e = 5
+  )
+summary(CS_spillover_dynamic_effect)
+
+CS_spillover_baseline_data <- data.frame(
+  time_periods = CS_spillover_dynamic_effect$egt,       # Relative time periods
+  estimate = CS_spillover_dynamic_effect$att.egt,      # ATT estimates
+  ci_lower = CS_spillover_dynamic_effect$att.egt - 1.96 * CS_spillover_dynamic_effect$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_spillover_dynamic_effect$att.egt + 1.96 * CS_spillover_dynamic_effect$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_spillover_baseline_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+
+```
+
+### Taking into Account Hospital Size
+
+```{r}
+df_cleaned <- df_prep_spillover_3 %>%
+#  filter(treated_unit == FALSE) %>%
+  mutate(hospital_size_group = case_when(
+    staff_doctors_nurses_numeric < 10 ~ "tiny",
+#    staff_doctors_nurses_numeric < 40 ~ "small",
+#    staff_doctors_nurses_numeric < 80 ~ "medium",
+    TRUE ~ "large"
+  ))%>%
+    filter(hospital_size_group == "large" | treated_unit == 0)
+
+head(df_cleaned)
+```
+
+
+```{r}
+CS_direct_treatment_results_large <- att_gt(
+  yname = "employment_level",         # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Direct treatment timing
+  data = df_cleaned,
+  xformla = ~
+    population_density_baseline_year
+  + income_tax_per_capita_baseline_year
+  + core_budget_debt_per_capita_baseline_year
+  ,
+control_group = "notyettreated"      # Compare to untreated controls
+)
+
+summary(CS_direct_treatment_results_large)
+
+# Aggregate dynamic effects
+CS_direct_dynamic_effect <- aggte(
+  CS_direct_treatment_results_large,
+  type = "dynamic",
+  na.rm = TRUE,
+#  min_e = 0,       # Start at year 0 (treatment year)
+  max_e = 7
+  )
+
+summary(CS_direct_dynamic_effect)
+```
+
+```{r}
+weights <- CS_direct_treatment_results_large$Wp  # Extract weights
+summary(weights)  # Check weight distribution
+str(CS_direct_treatment_results_large)
+
+```
+
+
+```{r}
+CS_direct_treatment_results_medium <- att_gt(
+  yname = "employment_level",         # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Direct treatment timing
+  data = df_cleaned %>%
+    filter(hospital_size_group == "medium" | treated_unit == 0),
+  xformla = ~ population_density_baseline_year + income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year,
+control_group = "notyettreated"      # Compare to untreated controls
+)
+
+summary(CS_direct_treatment_results_medium)
+
+# Aggregate dynamic effects
+CS_direct_dynamic_effect <- aggte(
+  CS_direct_treatment_results_medium,
+  type = "dynamic",
+  na.rm = TRUE,
+  min_e = 0,       # Start at year 0 (treatment year)
+  max_e = 5
+  )
+
+summary(CS_direct_dynamic_effect)
+```
+
+```{r}
+CS_direct_treatment_results_small <- att_gt(
+  yname = "employment_level",         # Outcome variable
+  tname = "Year",                     # Time variable
+  idname = "ARS_original",             # Unit identifier
+  gname = "year_of_closure",            # Direct treatment timing
+  data = df_cleaned %>%
+    filter(hospital_size_group == "small" | treated_unit == 0),
+  xformla = ~ population_density_baseline_year + income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year,
+control_group = "notyettreated"      # Compare to untreated controls
+)
+
+summary(CS_direct_treatment_results_small)
+
+# Aggregate dynamic effects
+CS_direct_dynamic_effect <- aggte(
+  CS_direct_treatment_results_small,
+  type = "dynamic",
+  na.rm = TRUE,
+  min_e = 0,       # Start at year 0 (treatment year)
+  max_e = 5
+  )
+
+summary(CS_direct_dynamic_effect)
+```
+
+```{r}
+# Aggregate dynamic effects
+CS_dynamic_effect_large <- aggte(
+  CS_direct_treatment_results_large, 
+  type = "dynamic", 
+  na.rm = TRUE,
+#  min_e = 0,       # Start at year 0 (treatment year)
+#  max_e = 7
+  )
+summary(CS_dynamic_effect_large)
+
+CS_dynamic_effect_large_data <- data.frame(
+  time_periods = CS_dynamic_effect_large$egt,       # Relative time periods
+  estimate = CS_dynamic_effect_large$att.egt,      # ATT estimates
+  ci_lower = CS_dynamic_effect_large$att.egt - 1.96 * CS_dynamic_effect_large$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_dynamic_effect_large$att.egt + 1.96 * CS_dynamic_effect_large$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_dynamic_effect_large_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+
+```
+
+### Handle covariates and assess model performance
+#### Balance Checking
+#####extract data
+```{r}
+df_merge <- df_cleaned %>%
+              dplyr::select(
+                ARS_original,
+                Year,
+                treated_unit
+              )
+
+# Extract the dataset actually used in `att_gt()`
+data_used_for_estimation <- CS_direct_treatment_results_large$D
+
+# Check its structure
+str(data_used_for_estimation)
+
+df_used_for_estimation <- data_used_for_estimation$data %>%
+  rename(weights = ".w")
+
+df_used_for_estimation <- df_used_for_estimation %>%
+  left_join(df_merge,
+            by = c("ARS_original", "Year")
+  )
+
+str(df_used_for_estimation)
+head(df_used_for_estimation)
+
+summary(df_used_for_estimation$weights)
+```
+
+#####estimation Propensity score weights
+```{r}
+library(cobalt)
+
+# Extract weights from the model
+weights <- CS_direct_treatment_results_large$Wp # Propensity score weights
+CS_direct_treatment_results_large
+
+# Use cobalt to assess balance
+bal.tab <- bal.tab(
+  ~ population_density_baseline_year + income_tax_per_capita_baseline_year + core_budget_debt_per_capita_baseline_year, 
+  weights = df_used_for_estimation$weights, 
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit # Explicitly provide treatment assignment
+  )
+print(bal.tab)
+```
+
+#####estimation overlap_weights on manual propensity score weighting
+```{r}
+# Manually estimate propensity scores
+propensity_model <- glm(treated_unit ~ population_density_baseline_year + 
+                        income_tax_per_capita_baseline_year + 
+                        core_budget_debt_per_capita_baseline_year,
+                        data = df_used_for_estimation,
+                        family = binomial)
+
+# Extract fitted propensity scores
+df_used_for_estimation$propensity_score <- predict(propensity_model, type = "response")
+
+# Compute overlap weights manually
+df_used_for_estimation$overlap_weights <- pmin(df_used_for_estimation$propensity_score, 1 - df_used_for_estimation$propensity_score)
+
+# Rerun balance checking with corrected overlap weights
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = df_used_for_estimation$overlap_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+
+```
+```{r}
+summary(df_used_for_estimation$propensity_score)
+hist(df_used_for_estimation$propensity_score, breaks = 20, main = "Propensity Score Distribution")
+
+```
+```{r}
+df_used_for_estimation$propensity_score <- pmax(pmin(df_used_for_estimation$propensity_score, 0.8), 0.2)
+
+df_used_for_estimation$overlap_weights <- pmin(df_used_for_estimation$propensity_score, 
+                                               1 - df_used_for_estimation$propensity_score)
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = df_used_for_estimation$overlap_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+
+```
+```{r}
+df_used_for_estimation <- df_used_for_estimation %>%
+  filter(propensity_score > 0.01)  # Drop untreated units with extreme values
+
+summary(df_used_for_estimation$propensity_score)  # Check new distribution
+
+```
+
+
+#####estimation Entropy Balancing
+```{r}
+# Install ebal package if not already installed
+if (!require(ebal)) install.packages("ebal")
+library(ebal)
+
+# Perform entropy balancing
+ebal_results <- ebalance(
+  Treatment = df_used_for_estimation$treated_unit,
+  X = df_used_for_estimation %>%
+    dplyr::select(population_density_baseline_year, 
+           income_tax_per_capita_baseline_year, 
+           core_budget_debt_per_capita_baseline_year)
+)
+
+# Extract the entropy balancing weights
+entropy_weights <- ifelse(df_used_for_estimation$treated_unit == 1, 1, ebal_results$w)
+
+# Use these weights in bal.tab()
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = entropy_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+
+```
+
+```{r}
+df_used_for_estimation <- df_used_for_estimation %>%
+  mutate(pop_density_sq = population_density_baseline_year^2,
+         income_tax_sq = income_tax_per_capita_baseline_year^2)
+
+ebal_results <- ebalance(
+  Treatment = df_used_for_estimation$treated_unit,
+  X = df_used_for_estimation %>%
+    dplyr::select(population_density_baseline_year, pop_density_sq,
+           income_tax_per_capita_baseline_year, income_tax_sq,
+           core_budget_debt_per_capita_baseline_year)
+)
+
+# Extract the entropy balancing weights
+entropy_weights <- ifelse(df_used_for_estimation$treated_unit == 1, 1, ebal_results$w)
+
+# Use these weights in bal.tab()
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = entropy_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+```
+```{r}
+df_used_for_estimation <- df_used_for_estimation %>%
+  mutate(
+    pop_density_sq = population_density_baseline_year^2,
+    income_tax_sq = income_tax_per_capita_baseline_year^2,
+    debt_density_interaction = core_budget_debt_per_capita_baseline_year * population_density_baseline_year
+  )
+
+ebal_results <- ebalance(
+  Treatment = df_used_for_estimation$treated_unit,
+  X = df_used_for_estimation %>%
+    dplyr::select(population_density_baseline_year, pop_density_sq,
+           income_tax_per_capita_baseline_year, income_tax_sq,
+           core_budget_debt_per_capita_baseline_year, debt_density_interaction)
+)
+
+entropy_weights <- ifelse(df_used_for_estimation$treated_unit == 1, 1, ebal_results$w)
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = entropy_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+
+hist(entropy_weights)
+var(entropy_weights)
+```
+
+
+
+#####estimation IPTW
+
+```{r}
+library(CBPS)
+
+cbps_model <- CBPS(treated_unit ~ population_density_baseline_year + 
+                    income_tax_per_capita_baseline_year + 
+                    core_budget_debt_per_capita_baseline_year,
+                   data = df_used_for_estimation, method = "exact")
+
+# Extract CBPS weights
+df_used_for_estimation$cbps_weights <- cbps_model$weights
+
+
+```
+
+```{r}
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  weights = df_used_for_estimation$cbps_weights,
+  data = df_used_for_estimation,
+  treat = df_used_for_estimation$treated_unit
+)
+```
+
+```{r}
+# Summarize weights
+summary(df_used_for_estimation$cbps_weights)
+
+# Visualize weight distribution
+hist(df_used_for_estimation$cbps_weights, breaks = 30, main = "CBPS Weight Distribution")
+summary(cbps_model$weights)
+cbps_model$converged
+
+```
+
+
+
+
+#### Create Weighting
+```{r}
+df_cleaned_weighting <- df_cleaned %>%
+  filter(complete.cases(population_density_baseline_year, 
+                        income_tax_per_capita_baseline_year, 
+                        core_budget_debt_per_capita_baseline_year,
+                        treated_unit))
+
+
+propensity_model <- glm(treated_unit ~ population_density_baseline_year + 
+                        income_tax_per_capita_baseline_year + 
+                        core_budget_debt_per_capita_baseline_year,
+                        data = df_cleaned_weighting,
+                        family = binomial)
+
+df_cleaned_weighting$propensity_score <- predict(propensity_model, type = "response")
+summary(df_cleaned_weighting$propensity_score)  # Check distribution
+
+```
+
+```{r}
+str(df_cleaned$propensity_score)
+
+
+summary(df_cleaned_weighting$propensity_score)
+hist(df_cleaned_weighting$propensity_score, breaks = 30, main = "Propensity Score Distribution")
+summary(propensity_model)
+
+```
+
+```{r}
+df_cleaned_weighting <- df_cleaned_weighting %>%
+  mutate(
+    population_density_scaled = scale(population_density_baseline_year),
+    income_tax_scaled = scale(income_tax_per_capita_baseline_year),
+    core_budget_debt_scaled = scale(core_budget_debt_per_capita_baseline_year)
+  )
+
+propensity_model_2 <- glm(treated_unit ~ population_density_scaled + 
+                        income_tax_scaled + 
+                        core_budget_debt_scaled,
+                        family = binomial,
+                        data = df_cleaned_weighting)
+
+df_cleaned_weighting$propensity_score_2 <- predict(propensity_model_2, type = "response")
+summary(df_cleaned_weighting$propensity_score_2)  # Check distribution
+```
+```{r}
+str(df_cleaned$propensity_score_2)
+
+
+summary(df_cleaned_weighting$propensity_score_2)
+hist(df_cleaned_weighting$propensity_score_2, breaks = 30, main = "Propensity Score Distribution")
+summary(propensity_model_2)
+
+```
+
+```{r}
+library(dplyr)
+
+df_cleaned_weighting %>%
+  group_by(treated_unit) %>%
+  summarise(
+    mean_population_density = mean(population_density_baseline_year, na.rm = TRUE),
+    mean_income_tax = mean(income_tax_per_capita_baseline_year, na.rm = TRUE),
+    mean_budget_debt = mean(core_budget_debt_per_capita_baseline_year, na.rm = TRUE),
+    n = n()
+  )
+
+```
+
+####Matching Based approach 
+```{r}
+library(MatchIt)
+
+match_model <- matchit(
+  treated_unit ~ population_density_baseline_year + 
+                income_tax_per_capita_baseline_year + 
+                core_budget_debt_per_capita_baseline_year,
+  data = df_cleaned_weighting,
+  method = "nearest",
+  ratio = 5  # 1:1 matching
+)
+
+matched_data <- match.data(match_model)
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  data = matched_data,
+  treat = matched_data$treated_unit
+)
+
+library(ggplot2)
+
+ggplot() +
+#  geom_density(data = df_cleaned_weighting, aes(x = propensity_score, fill = as.factor(treated_unit)), alpha = 0.3) +
+  geom_density(data = matched_data, aes(x = propensity_score, fill = as.factor(treated_unit)), alpha = 0.7) +
+  labs(title = "Density of Propensity Scores Before and After Matching",
+       x = "Propensity Score",
+       fill = "Treatment Status") +
+  theme_minimal()
+
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Add a column to indicate if the data is before or after matching
+df_cleaned_weighting <- df_cleaned_weighting %>%
+  mutate(matching_status = "Before Matching")
+
+matched_data <- matched_data %>%
+  mutate(matching_status = "After Matching")
+
+# Combine datasets for faceting
+plot_data <- bind_rows(df_cleaned_weighting, matched_data)
+
+# Facet plot
+ggplot(plot_data, aes(x = propensity_score, fill = as.factor(treated_unit))) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~ matching_status) +  # Separate panels for Before/After Matching
+  labs(title = "Propensity Score Distribution Before and After Matching",
+       x = "Propensity Score",
+       fill = "Treatment Status") +
+  theme_minimal()
+```
+```{r}
+library(MatchIt)
+library(dplyr)
+
+# Define matching methods and ratios
+matching_configs <- list(
+  "Nearest (1:1)" = matchit(treated_unit ~ population_density_baseline_year + 
+                              income_tax_per_capita_baseline_year + 
+                              core_budget_debt_per_capita_baseline_year,
+                            data = df_cleaned_weighting, method = "nearest", ratio = 1),
+  
+  "Nearest (1:3)" = matchit(treated_unit ~ population_density_baseline_year + 
+                              income_tax_per_capita_baseline_year + 
+                              core_budget_debt_per_capita_baseline_year,
+                            data = df_cleaned_weighting, method = "nearest", ratio = 3),
+  
+  "Nearest (1:5)" = matchit(treated_unit ~ population_density_baseline_year + 
+                              income_tax_per_capita_baseline_year + 
+                              core_budget_debt_per_capita_baseline_year,
+                            data = df_cleaned_weighting, method = "nearest", ratio = 5),
+  
+  "Nearest (1:10)" = matchit(treated_unit ~ population_density_baseline_year + 
+                               income_tax_per_capita_baseline_year + 
+                               core_budget_debt_per_capita_baseline_year,
+                             data = df_cleaned_weighting, method = "nearest", ratio = 10)
+)
+
+# Extract matched datasets
+matched_datasets <- lapply(names(matching_configs), function(name) {
+  matched_data <- match.data(matching_configs[[name]]) %>%
+    mutate(matching_method = name)  # Label method
+  return(matched_data)
+})
+
+# Combine all matched datasets into one dataframe
+matched_data_all <- bind_rows(matched_datasets)
+
+```
+
+```{r}
+# Add an indicator to original data
+df_cleaned_weighting <- df_cleaned_weighting %>%
+  mutate(matching_method = "Before Matching")
+
+# Combine original and all matched datasets
+plot_data <- bind_rows(df_cleaned_weighting, matched_data_all)
+
+library(ggplot2)
+
+ggplot(plot_data, aes(x = propensity_score, fill = as.factor(treated_unit))) +
+  geom_density(alpha = 0.7) +
+  facet_wrap(~ matching_method) +  # Facet by matching method
+  labs(title = "Propensity Score Distribution Across Matching Methods",
+       x = "Propensity Score",
+       fill = "Treatment Status") +
+  theme_minimal()
+
+```
+
+```{r}
+matched_datasets <- lapply(names(matching_configs), function(name) {
+  matched_model <- matching_configs[[name]]  # Get MatchIt model
+  matched_data <- match.data(matched_model) %>%
+    mutate(matching_method = name)  # Label matching method
+  return(matched_data)
+})
+
+# Combine all matched datasets
+matched_data_all <- bind_rows(matched_datasets)
+
+library(cobalt)
+
+bal.tab(
+  ~ population_density_baseline_year + 
+    income_tax_per_capita_baseline_year + 
+    core_budget_debt_per_capita_baseline_year,
+  data = matched_data_all %>% filter(matching_method == "Nearest (1:5)"),
+  treat = matched_data_all %>% filter(matching_method == "Nearest (1:5)") %>% pull(treated_unit)
+)
+
+```
+
+
+```{r}
+CS_matched_treatment_results <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS_original",
+  gname = "year_of_closure",
+  data = matched_data_all %>% filter(matching_method == "Nearest (1:5)")%>%
+  distinct(ARS, Year, .keep_all = TRUE),  # Keep only one row per ARS-Year combination,  # Use best matched data
+  xformla = ~ population_density_baseline_year +
+              income_tax_per_capita_baseline_year +
+              core_budget_debt_per_capita_baseline_year,
+  control_group = "notyettreated"
+)
+
+summary(CS_matched_treatment_results)
+
+
+```
+
+```{r}
+dropped_units <- anti_join(
+  matched_data_all %>% filter(matching_method == "Nearest (1:1)"),
+  att_gt(
+    yname = "employment_level",
+    tname = "Year",
+    idname = "ARS_original",
+    gname = "year_of_closure",
+    data = matched_data_all %>% filter(matching_method == "Nearest (1:1)"),
+    control_group = "notyettreated"
+  )$DIDparams$data,
+  by = "ARS_original"
+)
+
+dropped_summary <- dropped_units %>%
+  group_by(ARS_original) %>%
+  summarise(
+    missing_years = n(),
+    first_missing = min(Year),
+    last_missing = max(Year)
+  ) %>%
+  arrange(desc(missing_years))
+
+print(dropped_summary)
+
+```
+
+```{r}
+# Aggregate dynamic effects
+CS_dynamic_effect_matched <- aggte(
+  CS_matched_treatment_results, 
+  type = "dynamic", 
+  na.rm = TRUE,
+#  min_e = 0,       # Start at year 0 (treatment year)
+#  max_e = 7
+  )
+summary(CS_dynamic_effect_matched)
+
+CS_dynamic_effect_matched_data <- data.frame(
+  time_periods = CS_dynamic_effect_large$egt,       # Relative time periods
+  estimate = CS_dynamic_effect_matched$att.egt,      # ATT estimates
+  ci_lower = CS_dynamic_effect_matched$att.egt - 1.96 * CS_dynamic_effect_matched$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_dynamic_effect_matched$att.egt + 1.96 * CS_dynamic_effect_matched$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_dynamic_effect_matched_data, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+```
+#####check balance after matching and rebalancing
+
+```{r}
+library(twang)
+df_cleaned_weighting_twang <- data.frame(df_cleaned_weighting)
+
+ps_model <- ps(
+  treated_unit ~ population_density_baseline_year + 
+                income_tax_per_capita_baseline_year + 
+                core_budget_debt_per_capita_baseline_year,
+  data = df_cleaned_weighting_twang,
+  estimand = "ATE",
+  method = "gbm"
+)
+
+df_cleaned_weighting$kernel_weights <- ps_model$w
+
+```
+
+#### Handling Multicollinearity or Irrelevant Covariates
+```{r}
+library(glmnet)
+
+# Prepare design matrix for covariates
+X <- model.matrix(~ x1 + x2 + x3, data = mydata)[, -1] # Exclude intercept
+
+# Fit lasso regression for propensity score estimation
+lasso_model <- cv.glmnet(X, mydata$g, alpha = 1, family = "binomial")
+selected_covariates <- rownames(coef(lasso_model, s = "lambda.min"))[-1]
+
+# Use only selected covariates in the `did` model
+results <- att_gt(
+  yname = "y",
+  tname = "t",
+  idname = "id",
+  gname = "g",
+  xformla = as.formula(paste("~", paste(selected_covariates, collapse = "+"))),
+  data = mydata,
+  est_method = "dr"
+)
+```
+
+
+#### Extract and Assess Propensity Scores
+```{r}
+# Extract weights and propensity scores from the `did` model
+results <- att_gt(..., est_method = "dr")
+propensity_scores <- results$p
+
+# Check for extreme weights
+summary(results$Wp)
+
+# visualize the propensity scores and assess overlap between treated and untreated groups
+library(ggplot2)
+ggplot(data = mydata, aes(x = propensity_scores, color = as.factor(g))) +
+  geom_density() +
+  labs(title = "Propensity Score Overlap", x = "Propensity Score", color = "Group")
+```
+
+#### Trimming Weights
+```{r}
+trimmed_weights <- ifelse(results$Wp > quantile(results$Wp, 0.99), quantile(results$Wp, 0.99), results$Wp)
+
+```
+
+
+
+## Based on Distance
+
+```{r}
+# this is for centriods, it would make more sense to do it for the coordinates of the closed hospitals
+germany_shp$centroid <- st_centroid(germany_shp$geometry)
+distance_matrix <- st_distance(germany_shp$centroid, germany_shp$centroid)
+
+# Define neighbors within 50 km
+germany_shp$neighbors <- lapply(1:nrow(distance_matrix), function(i) {
+  which(distance_matrix[i, ] < 50000 & distance_matrix[i, ] > 0)
+})
+
+```
+
+## Based on Administrative

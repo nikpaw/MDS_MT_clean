@@ -1,0 +1,493 @@
+---
+title: "import_hospital_reports"
+author: "Niklas Pawelzik"
+date: "2024-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import data from xml quality reports into dataframes 
+
+```{r import packages}
+library(xml2)
+library(tidyverse)
+library(tidygeocoder)
+library(maps)
+library(readxl)
+```
+
+```{r list of all years}
+# list of all years:
+all_years <- c(
+  2022, 
+  2021, 
+  2020, 
+  2019, 
+  2018, 
+  2017, 
+  2016, 
+  2015, 
+  2014, 
+  2013, 
+  2012, 
+  2010, 
+  2008
+)
+```
+
+```{r import data and create dataframes}
+# Define the base path and years
+base_path <- "./raw_data/Krankenhaus_Qualitaetsberichte_2008-2022/xml_"
+years <- c(
+2008
+  )
+
+# Loop through each year, process the XML files, and store the results
+for (year in all_years) {
+  # Construct the file path for the current year
+  file_path <- paste0(base_path, year)
+  
+  # List XML files in the directory for the current year
+  xml_files <- list.files(path = file_path, pattern = "-xml.xml", full.names = TRUE)
+  
+  # Initialize lists to store data frames for each extraction function
+  df_list_hospital_location <- list()
+  df_list_hospital_cases_beds <- list()
+  df_list_hospital_staff <- list()
+  
+  # Iterate through each file, read it as XML, and process the data
+  for (file in xml_files) {
+    xml_data <- read_xml(file)
+    
+    # Extract and process the XML data using the provided functions
+    df_list_hospital_location[[file]] <- extract_standortdaten(xml_data)
+    df_list_hospital_cases_beds[[file]] <- extract_fallzahlen_bettzahlen(xml_data)
+    df_list_hospital_staff[[file]] <- extract_personal(xml_data)
+  }
+  
+  # Combine the lists into single data frames
+  df_hospital_location <- do.call(rbind, df_list_hospital_location)
+  df_hospital_cases_beds <- do.call(rbind, df_list_hospital_cases_beds)
+  df_hospital_staff <- do.call(rbind, df_list_hospital_staff)
+  
+  # Add a column with the respective year to each data frame
+  df_hospital_location$year <- year
+  df_hospital_cases_beds$year <- year
+  df_hospital_staff$year <- year
+  
+  # Assign the data frames to variables with year-specific names
+  assign(paste0("df_hospital_location_", year), df_hospital_location)
+  assign(paste0("df_hospital_cases_beds_", year), df_hospital_cases_beds)
+  assign(paste0("df_hospital_staff_", year), df_hospital_staff)
+  
+  # Clear memory by removing intermediate lists
+  rm(
+    df_list_hospital_location,
+    df_list_hospital_cases_beds, 
+    df_list_hospital_staff, 
+    xml_files, 
+    df_hospital_location, 
+    df_hospital_cases_beds, 
+    df_hospital_staff
+    )
+  
+  # Run garbage collection to free up memory
+  gc()
+}
+```
+
+
+```{r combine annual dataframes}
+# combine dataframes for all years
+df_hospital_location_merged <- rbind(
+  df_hospital_location_2008,
+  df_hospital_location_2010,
+  df_hospital_location_2012,
+  df_hospital_location_2013,
+  df_hospital_location_2014,
+  df_hospital_location_2015,
+  df_hospital_location_2016,
+  df_hospital_location_2017,
+  df_hospital_location_2018,
+  df_hospital_location_2019,
+  df_hospital_location_2020,
+  df_hospital_location_2021,
+  df_hospital_location_2022
+  )
+
+# DataFrame nach den angegebenen Spalten sortieren
+df_hospital_location_merged_sorted <- df_hospital_location_merged %>%
+  arrange(Postleitzahl, Strasse, Hausnummer, IK_Institutionskennzeichen, Name, year)
+```
+
+## Export annual hospital dataframes for location, cases_beds and staff 
+
+```{r export location dataframes for all years}
+for (year in all_years) {
+  df_name <- paste0("df_hospital_location_", year)
+  df <- get(df_name)
+  file_path <- file.path("cleaned_data", paste0(df_name, ".csv"))
+  write.csv(df, file_path, row.names = FALSE)
+}
+```
+
+
+```{r export cases_beds dataframes for all years}
+for (year in all_years) {
+  df_name <- paste0("df_hospital_cases_beds_", year)
+  df <- get(df_name)
+  file_path <- file.path("cleaned_data", paste0(df_name, ".csv"))
+  write.csv(df, file_path, row.names = FALSE)
+}
+```
+
+
+```{r export staff dataframes for all years}
+for (year in all_years) {
+  df_name <- paste0("df_hospital_staff_", year)
+  df <- get(df_name)
+  file_path <- file.path("cleaned_data", paste0(df_name, ".csv"))
+  write.csv(df, file_path, row.names = FALSE)
+}
+```
+
+## Excurse: Hospital Location dfs, latest data per hospital
+
+```{r identifying latest year for each hospital id}
+df_hospital_location_latest <- df_hospital_location_merged %>%
+  # group per hospital id
+  group_by(IK_Institutionskennzeichen) %>%
+  # identify and keep only most recent year per hospital id
+  filter(year == max(year)) %>%
+  ungroup() %>%
+  # exclude hospitals that apparently are still open
+  filter(year != 2022)
+
+# Ausgabe des sortierten DataFrames
+print(df_hospital_location_merged_sorted)  
+```
+
+```{r distribution latest year for each hopsital id}
+# Häufigkeit der Werte in der Spalte 'year' anzeigen
+value_counts <- df_hospital_location_latest %>%
+  count(year) %>%
+  arrange(desc(n))
+
+print(value_counts)
+```
+
+
+```{r geocode with sample works}
+sample_size <- 20
+df_hospital_location_latest_sample <- df_hospital_location_latest %>%
+  sample_n(sample_size)
+
+df_hospital_location_latest_sample <- df_hospital_location_latest_sample %>%
+  geocode(Adresse, method = 'osm', lat = latitude, long = longitude)
+```
+
+
+```{r mapping sample works}
+df_hospital_location_latest_sample$year <- as.factor(df_hospital_location_latest_sample$year)
+
+var_color <- "year"
+
+de <- map_data("world", region = "Germany")
+map_de <- ggplot(de,
+       aes(x= long, y= lat)) +
+  geom_polygon(aes(group = group),
+    fill = "lightgray", color = "white") +
+  geom_polygon(aes(group = group, colour = year),
+               color = "black", fill = NA) +
+               geom_point(data = df_hospital_location_latest_sample, aes(x = longitude, y = latitude, color = get(var_color))) +
+               scale_color_manual(values = c(
+                    "2022" = "blue",
+                    "2021" = "red",
+                    "2020" = "green",
+                    "2019" = "orange",
+                    "2018" = "purple",
+                    "2017" = "yellow",
+                    "2016" = "cyan",
+                    "2015" = "magenta",
+                    "2014" = "darkgreen",
+                    "2013" = "darkblue",
+                    "2012" = "darkred",
+                    "2010" = "darkorange",
+                    "2008" = "darkcyan"
+               ))  # Farbpalette definieren
+
+print(map_de)
+```
+
+## Geocoding of Hospital Location Dataframes
+
+```{r create an hospital_index for merged location dataframe}
+df_hospital_location_merged <- df_hospital_location_merged %>%
+  mutate(hospital_index = row_number())
+```
+
+
+```{r adressen unique}
+df_adressen <- data.frame(unique(df_hospital_location_merged$Adresse)) %>%
+  rename(Adresse = unique.df_hospital_location_merged.Adresse.) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse, " NA,", "")) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse_clean, "str\\.", "strasse")) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse_clean, "Str\\.", "Strasse")) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse_clean, "starße", "strasse")) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse_clean, "stra&szlig;e", "strasse"))
+```
+
+```{r confirmation: adressen unique contains all adresses from merged location dataframe}
+# Führe einen inner_join durch, um die übereinstimmenden Zeilen zu finden
+matching_rows <- inner_join(df_adressen, df_hospital_location_merged, by = c("Adresse"))
+
+# Anzahl der übereinstimmenden Zeilen
+num_matching_rows <- nrow(matching_rows)
+
+# Zeige die Anzahl der übereinstimmenden Zeilen an
+print(num_matching_rows)
+```
+
+```{r adressen unique contains one hospital per adress from merged location dataframe as per hospital_index}
+df_adressen_tester <- df_adressen %>%
+  left_join(df_hospital_location_merged, by = "Adresse")  %>%
+  select(Adresse, Adresse_clean, hospital_index) %>%
+  distinct(Adresse, .keep_all = TRUE)
+
+# df_adressen_tester <- data.frame(unique(df_adressen_tester$Adresse_clean))
+```
+
+```{r optional: sample}
+sample_size <- 200
+df_adressen_sample_2 <- df_adressen %>%
+  sample_n(sample_size)
+
+df_adressen_sample_2 <- df_adressen_sample_2 %>%
+  geocode(Adresse_clean, method = 'osm', lat = latitude, long = longitude)
+```
+
+
+```{r export adress dataframe, skipped on 24/08/07}
+file_path <- file.path("cleaned_data", "df_adressen.tsv")
+write_tsv(df_adressen, file_path)
+```
+
+```{r optional, skip for now: export adress_tester dataframe}
+file_path <- file.path("cleaned_data", "df_adressen_tester.tsv")
+write_tsv(df_adressen_tester, file_path)
+```
+
+```{r optional: export df_hospital_location_merged dataframe}
+file_path <- file.path("cleaned_data", "df_hospital_location_merged.tsv")
+write_tsv(df_hospital_location_merged, file_path)
+```
+
+```{r optional: reload df_hospital_location_merged dataframe}
+df_hospital_location_merged_reload <- read_tsv("./cleaned_data/df_hospital_location_merged.tsv")
+```
+
+```{r reload adress dataframe, skipped on 24/08/07}
+df_adressen_2 <- read_tsv("./cleaned_data/df_adressen.tsv")
+```
+
+```{r geocode adressen_tester dataframe}
+df_adressen_tester_geocoded <- df_adressen_tester %>%
+  geocode(Adresse_clean, method = 'osm', lat = latitude, long = longitude)
+```
+
+```{r identifying remaining NA for adressen_tester dataframe and re-run after some further string-cleaning}
+df_adressen_tester_geocoded_NA <- df_adressen_tester_geocoded %>%
+  filter(is.na(latitude))
+
+df_adressen_tester_geocoded_NA_2 <- df_adressen_tester_geocoded_NA %>%
+  mutate(Adresse_clean = sub("^(.*?\\d{5}).*", "\\1", Adresse_clean)) %>%
+  mutate(Adresse_clean = str_replace_all(Adresse_clean, "Stra&szlig;e", "Strasse")) %>%
+  mutate(Adresse_clean = sub("(\\d+)-\\d+", "\\1", Adresse_clean))
+
+
+ df_adressen_tester_geocoded_NA_2 <- df_adressen_tester_geocoded_NA_2 %>%
+  geocode(Adresse_clean, method = 'osm', lat = latitude, long = longitude)
+```
+
+
+```{r export adress dataframe}
+file_path <- file.path("cleaned_data", "df_adressen_geocoded.tsv")
+write_tsv(df_adressen_2_geocoded, file_path)
+```
+
+
+```{r index tester_df to match manuell gegeocodete Adressen}
+# creation of an index to match manuell gegeocodete Adressen
+# needs double check to confirm that addresses are the same with tester_df
+df_adressen_tester_geocoded_NA_2 <- df_adressen_tester_geocoded_NA_2 %>%
+  mutate(index = row_number())
+
+# filter for NA in first coordinate to identify list of adresses to be manually geocodet 
+# needs double check to confirm that addresses are the same with tester_df
+df_adressen_tester_geocoded_NA_2_NA <- df_adressen_tester_geocoded_NA_2 %>%
+  filter(is.na(.[[7]])) 
+
+
+# file_path <- file.path("cleaned_data", "df_adressen_geocoded_NAs_2.xlsx")
+# write_excel_csv(df_adressen_2_geocoded_NA_2_NA, file_path)
+```
+
+
+
+```{r einlesen der excel der manuell gegeocodeten Adressen, updated for tester_df}
+# needs double check to confirm that addresses are the same with tester_df
+hospital_data_manual_geocoding <- read_excel("./raw_data/hospital_data_manual_geocoding.xlsx",
+                                             col_names = c(
+                                               "Adresse",
+                                               "Adresse_clean",
+                                               "Coordinates",
+                                               "index",
+                                               "Other_2",
+                                               "Other_3"
+                                               )
+                                             ) 
+```
+
+
+```{r work back for tester_df: adding manual geocoding to df_adressen_tester_geocoded_NA_2}
+df_adressen_tester_geocoded_NA_2_NA_completed <- df_adressen_tester_geocoded_NA_2_NA %>%
+  left_join(hospital_data_manual_geocoding, by = "index") %>%
+  select(Adresse.x,
+         Adresse_clean.x, 
+         hospital_index,
+         Coordinates,
+         index
+         ) %>%
+  rename(
+         Adresse = Adresse.x,
+         Adresse_clean = Adresse_clean.x, 
+  )
+```
+
+```{r work back for tester_df: add second layer NA completion to first layer NA}
+ df_adressen_tester_geocoded_NA_2_completed <-  df_adressen_tester_geocoded_NA_2 %>%
+  left_join(df_adressen_tester_geocoded_NA_2_NA_completed, by = "hospital_index")  %>%
+  select(Adresse.x,
+         Adresse_clean.x, 
+         hospital_index,
+         index.x,
+         Coordinates,
+         latitude...6,
+         longitude...7
+  ) %>%
+  rename(
+         Adresse = Adresse.x,
+         Adresse_clean = Adresse_clean.x,
+         index = index.x,
+  )
+```
+
+
+```{r work back for tester_df: add NA completed layer to first layer dataframe, then some cleaning. Geocoding almost completed!}
+# check: what columns do the two joined dataframes have?
+# based on which columns do we join the dataframes?
+# do we select, merge, rename columns?
+
+df_adressen_tester_geocoded_completed <-  df_adressen_tester_geocoded %>%
+  left_join(df_adressen_tester_geocoded_NA_2_completed, by = "hospital_index")  %>%
+  select(Adresse.x,
+         Adresse_clean.x, 
+         hospital_index,
+         index,
+         Coordinates,
+         latitude,
+         longitude,
+         latitude...6,
+         longitude...7
+  ) %>%
+  rename(
+         Adresse = Adresse.x,
+         Adresse_clean = Adresse_clean.x
+  ) %>%
+  mutate(
+    latitude_coord = as.numeric(sub(",.*", "", Coordinates)),
+    longitude_coord = as.numeric(sub(".*,", "", Coordinates))
+  ) %>%
+  mutate(
+    latitude = coalesce(latitude, latitude...6, latitude_coord),
+    longitude = coalesce(longitude, longitude...7, longitude_coord)
+  ) %>%
+  select(
+    -latitude...6, 
+    -longitude...7,
+    -latitude_coord,
+    -longitude_coord,
+    -Coordinates
+    )
+```
+
+```{r add coordinates to dataframe that contains all addresses and Standortinformationen. Geocoding completed!}
+df_hospital_location_merged_geocoded <- df_hospital_location_merged %>%
+  left_join(df_adressen_tester_geocoded_completed, by = "hospital_index") %>%
+  arrange(Adresse.x, index) %>%
+  fill(latitude, longitude, .direction = "down") %>%
+  rename(
+         Adresse = Adresse.x,
+  ) %>%
+  select(
+    - Adresse.y
+  )
+```
+
+```{r export df_hospital_location_merged_geocoded.csv}
+file_path <- file.path("cleaned_data", "df_hospital_location_merged_geocoded.csv")
+write_csv(df_hospital_location_merged_geocoded, file_path)
+```
+
+
+```{r mapping sample works}
+df_hospital_location_merged_geocoded$year <- as.factor(df_hospital_location_merged_geocoded$year)
+df_hospital_location_merged_geocoded$Traegerart <- as.factor(df_hospital_location_merged_geocoded$Traegerart)
+
+df_hospital_location_merged_geocoded_2020 <- df_hospital_location_merged_geocoded %>%
+  filter(year == 2020) %>%
+  distinct(IK_Institutionskennzeichen, .keep_all = TRUE) %>%
+  distinct(Adresse, .keep_all = TRUE)
+
+df_hospital_location_merged_geocoded_2010 <- df_hospital_location_merged_geocoded %>%
+  filter(year == 2010) %>%
+  distinct(IK_Institutionskennzeichen, .keep_all = TRUE) %>%
+  distinct(Adresse, .keep_all = TRUE)
+
+var_color <- "Traegerart"
+
+de <- map_data("world", region = "Germany")
+
+map_de_2010 <- ggplot(de,
+       aes(x= long, y= lat)) +
+  geom_polygon(aes(group = group),
+    fill = "lightgray", color = "white") +
+  geom_polygon(aes(group = group, colour = year),
+               color = "black", fill = NA) +
+               geom_point(data = df_hospital_location_merged_geocoded_2010, aes(x = longitude, y = latitude, color = get(var_color)))
+
+map_de_2020 <- ggplot(de,
+       aes(x= long, y= lat)) +
+  geom_polygon(aes(group = group),
+    fill = "lightgray", color = "white") +
+  geom_polygon(aes(group = group, colour = year),
+               color = "black", fill = NA) +
+               geom_point(data = df_hospital_location_merged_geocoded_2020, aes(x = longitude, y = latitude, color = get(var_color)))
+
+```
+               
+```{r}
+print(map_de_2010)
+```
+
+
+```{r}
+print(map_de_2020)
+```
+```{r}
+nrow(df_hospital_location_merged_geocoded_2010)
+```
+

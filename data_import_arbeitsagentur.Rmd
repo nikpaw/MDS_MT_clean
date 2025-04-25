@@ -1,0 +1,80 @@
+---
+title: "Arbeitsagentur_import"
+author: "Niklas Pawelzik"
+date: "2024-07-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+AA_base_path <- "./raw_data/Arbeitsagentur_Erwerbstätigenstatistik/"
+
+df_AA_health_professions_complete_raw <- read_excel(paste0(AA_base_path, "raw_labourdata.xlsx"), skip = 10)
+
+```
+
+
+
+```{r}
+ # Create a function to generate the date column
+generate_dates <- function(df) {
+  # Initialize variables
+  # current dates needs to be set once month ahead since dataframe starts with NA
+  current_date <- as.Date("2024-01-01")
+  date_vector <- rep(NA, nrow(df))
+  assign_date <- FALSE
+  # Iterate over the rows of the dataframe
+  for (i in 1:nrow(df)) {
+    # using the first local key and loop through the subsequent rows
+    if (!is.na(df$`Kreis Schlüssel`[i]) && df$`Kreis Schlüssel`[i] == "01001000") {
+      if (!assign_date) {
+        assign_date <- TRUE
+        current_date <- current_date - months(1)
+      }
+    } else {
+      assign_date <- FALSE
+    }
+    
+    if (assign_date) {
+      date_vector[i] <- format(current_date, "%m/%Y")
+    }
+  }
+  
+  return(date_vector)
+}
+
+# Apply the function to create the new date column
+df_AA_health_professions_complete_raw_dates <- df_AA_health_professions_complete_raw %>%
+  mutate(date = generate_dates(.)) %>%
+  fill(date, .direction = "down") %>%
+  separate(date, into = c("month", "year"), sep = "/", remove = FALSE)
+
+# View the result
+print(df_AA_health_professions_complete_raw_dates)
+
+```
+
+```{r}
+df_AA_health_professions_annual <- df_AA_health_professions_complete_raw_dates %>%
+  filter(
+    month == "06"
+  )
+
+df_AA_health_professions_year_2020 <- df_AA_health_professions_annual %>%
+  filter(
+    year == "2020"
+  )
+
+df_AA_profession_813_year_2020 <- df_AA_health_professions_annual %>%
+  filter(
+    year == "2020",
+    `Berufsgruppe - 3 Steller Schlüssel` == "813"
+  )
+
+
+```
+

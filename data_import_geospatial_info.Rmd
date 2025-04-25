@@ -1,0 +1,233 @@
+---
+title: "import_NUTS3_info"
+author: "Niklas Pawelzik"
+date: "2024-07-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Regional Types
+
+```{r}
+# Define file path
+excel_path <- "raw_data/regional statistica data/2023 RegioStaR-Referenzdateien.xlsx"
+
+# List all sheet names
+sheets <- excel_sheets(excel_path)
+print(sheets)  # Check available sheets
+
+df_regiostar_complete <- read_excel(excel_path, sheet = "ReferenzGebietsstand2023", 
+                                col_types = "text")  # Load all columns as character
+
+df_regiostar_complete <- df_regiostar_complete %>%
+  mutate(
+    #ARS = ifelse(nchar(vbgemrs_23) == 8, paste0("0", vbgemrs_23), vbgemrs_23),
+    RegioStaR4from5 = case_when(
+      RegioStaR5 %in% c(51, 52) ~ "51/52",  # Merge Metropolen & Regiopolen
+      RegioStaR5 == 53 ~ "53",  # Stadtregionen - Umland remains the same
+      RegioStaR5 == 54 ~ "54",  # Ländliche Regionen - Städte remains the same
+      RegioStaR5 == 55 ~ "55"   # Ländliche Regionen - Kleinstädtischer Raum remains the same
+    ),
+    RegioStaR6from7 = case_when(
+      RegioStaR7 %in% c(71,72) ~ "71/72",
+      RegioStaR7 == 73 ~ "73",
+      RegioStaR7 == 74 ~ "74",
+      RegioStaR7 == 75 ~ "75",
+      RegioStaR7 == 76 ~ "76",
+      RegioStaR7 == 77 ~ "77"
+    )
+  )
+
+# Turn into factor levels 
+df_regiostar_complete$RegioStaR4from5 <- factor(
+  df_regiostar_complete$RegioStaR4from5,
+  levels = c("51/52", "53", "54", "55")
+)
+
+colnames(df_regiostar_complete)
+```
+
+
+relevant categories:
+RegioStaRGem7 (Gemeindetyp)
+RegioStaRGem5 (Gemeindetyp)
+RegioStaR2 (binary urban rural)
+RegioStaR17 (combines Gemeindetyp with Raumtyp, most finely defined)
+vbgemrs_23 seems to be equivalent to ARS and should be used for match and merge
+```{r regional types}
+# # Define file path
+# excel_path <- "raw_data/regional statistica data/2023 RegioStaR-Referenzdateien.xlsx"
+# 
+# # List all sheet names
+# sheets <- excel_sheets(excel_path)
+# print(sheets)  # Check available sheets
+# 
+# df_regiostar_complete <- read_excel(excel_path, sheet = "ReferenzGebietsstand2023", 
+#                                 col_types = "text")  # Load all columns as character
+# 
+# df_regiostar_2023 <- read_excel(excel_path, sheet = "ReferenzGebietsstand2023", 
+#                                 col_types = "text")  # Load all columns as character
+# 
+# df_regiostar_2023 <- df_regiostar_2023 %>%
+#   mutate(
+#     ARS = ifelse(nchar(vbgemrs_23) == 8, paste0("0", vbgemrs_23), vbgemrs_23),
+#     RegioStaR4from5 = case_when(
+#       RegioStaR5 %in% c(51, 52) ~ "51/52",  # Merge Metropolen & Regiopolen
+#       RegioStaR5 == 53 ~ "53",  # Stadtregionen - Umland remains the same
+#       RegioStaR5 == 54 ~ "54",  # Ländliche Regionen - Städte remains the same
+#       RegioStaR5 == 55 ~ "55"   # Ländliche Regionen - Kleinstädtischer Raum remains the same
+#   )) %>%
+#   distinct(
+#     RegioStaR2, RegioStaR4, RegioStaR17, RegioStaR7, RegioStaR5, 
+#     RegioStaRGem7, RegioStaRGem5, RegioStaR_Stadtregion, 
+#     RegioStaR_NameStadtregion, ARS, RegioStaR4from5, gemrs_23
+#   )
+# 
+# # Turn into factor levels 
+# df_regiostar_2023$RegioStaR4from5 <- factor(
+#   df_regiostar_2023$RegioStaR4from5,
+#   levels = c("51/52", "53", "54", "55")
+# )
+# 
+# table(nchar(unique(as.character(df_regiostar_2023$ARS))))
+# head(df_regiostar_2023)
+```
+
+# NUTS3 Info
+currently not required
+```{r NUTS3 info}
+NUTS3_base_path <- "./raw_data/"
+df_NUTS3 <- read_excel(paste0(NUTS3_base_path, "Kreisfreie_Städte_und_Landkreise_nach_Fläche_Bevölkerung_und_Bevölkerungsdichte.xlsx"), sheet = 2, skip = 3) %>%
+  drop_na(NUTS3)
+
+df_NUTS3 <- df_NUTS3[-1, ] %>%
+  rename(
+    Bevölkerung_insgesamt = "Bevölkerung2)",
+    Bevölkerung_männlich = `...7`,
+    Bevölkerung_weiblich = `...8`,
+    Bevölkerung_je_km2 = `...9`
+  )
+
+
+print(df_NUTS3)
+```
+
+
+
+#Shapesfiles
+
+```{r create shapes for Germany based on eurostat_package}
+# Retrieve NUTS-3 level geospatial data
+SHP_3 <- get_eurostat_geospatial(resolution = 10, nuts_level = 3) %>%
+  filter(CNTR_CODE == "DE")
+
+# Retrieve NUTS-2 level geospatial data
+SHP_2 <- get_eurostat_geospatial(resolution = 10, nuts_level = 2) %>%
+  filter(CNTR_CODE == "DE")
+
+# Retrieve NUTS-1 level geospatial data
+SHP_1 <- get_eurostat_geospatial(resolution = 10, nuts_level = 1) %>%
+  filter(CNTR_CODE == "DE")
+```
+
+```{r}
+# define paths
+path_flächen_ebene_gemeinde <- "raw_data/Shapefiles/Shapefile_Zensus2022/EPSG_25832/VG250_GEM.shp"
+path_grenzlinien <- "raw_data/Shapefiles/Shapefile_Zensus2022/EPSG_25832/VG250_LI.shp"
+path_flächen_ebene_verwaltungsgemeinschaft <- "raw_data/Shapefiles/Shapefile_Zensus2022/EPSG_25832/VG250_VWG.shp"
+
+
+
+# load Shapefiles
+shp_flächen_ebene_gemeinde <- st_read(path_flächen_ebene_gemeinde)
+shp_grenzlinien <- st_read(path_grenzlinien)
+shp_flächen_ebene_verwaltungsgemeinschaft <- st_read(path_flächen_ebene_verwaltungsgemeinschaft)
+
+shp_flächen_ebene_gemeinde <- st_transform(shp_flächen_ebene_gemeinde, crs = 4326)
+shp_grenzlinien <- st_transform(shp_grenzlinien, crs = 4326)
+shp_flächen_ebene_verwaltungsgemeinschaft <- st_transform(shp_flächen_ebene_verwaltungsgemeinschaft, crs = 4326)
+
+length(unique(shp_flächen_ebene_verwaltungsgemeinschaft$ARS))
+```
+```{r}
+ggplot() +
+  geom_sf(data = shp_flächen_ebene_verwaltungsgemeinschaft, fill = NA, color = "red", size = 0.4) +
+  ggtitle("Gemeinden (Municipalities)") +
+  theme_minimal()
+```
+
+## Combine Regiostar Dataset with Shapefiles
+```{r}
+# Convert ARS to character and ensure leading zeros
+df_regiostar_complete <- df_regiostar_complete %>%
+  mutate(ARS = str_pad(as.character(gemrs_23), width = 12, pad = "0"))  # Adjust width as needed
+
+shp_flächen_ebene_gemeinde <- shp_flächen_ebene_gemeinde %>%
+  mutate(ARS = str_pad(as.character(ARS), width = 12, pad = "0"))  # Ensure both match
+
+# Perform the join using ARS
+df_regiostar_with_gemeinde <- df_regiostar_complete %>%
+  left_join(
+    shp_flächen_ebene_gemeinde %>% dplyr::select(ARS, geometry),
+    #multiple = "any",
+    by = "ARS"
+  )
+
+# Convert to an sf object (spatial dataframe) after join
+df_regiostar_with_gemeinde <- st_as_sf(df_regiostar_with_gemeinde)
+```
+
+```{r mapping state borders}
+# Ensure gem_23 is padded and state_id extracted
+# Split by state and union geometries per state
+df_plot_map_states <- df_regiostar_with_gemeinde %>%
+  mutate(
+    gem_23 = str_pad(as.character(gem_23), width = 8, side = "left", pad = "0"),
+    state_id = substr(gem_23, 1, 2)
+  ) %>%
+  group_by(state_id) %>%
+  group_split() %>%
+  purrr::map_df(~ {
+    geom_union <- st_union(st_make_valid(.x$geometry))
+    tibble(state_id = unique(.x$state_id), geometry = geom_union)
+  }) %>%
+  st_as_sf()
+
+# Make sure geometries are valid and in projected CRS (important for accurate geometry operations)
+df_plot_map_states_clean <- df_plot_map_states %>%
+  st_make_valid() %>%
+  st_transform(25832)  # You can use 3857 too, but 25832 is good for Germany
+
+# Simplify if needed (optional, but can improve performance and clean geometry)
+df_plot_map_states_simp <- df_plot_map_states_clean %>%
+  ms_simplify(keep = 0.05, keep_shapes = TRUE)
+
+# Use ms_innerlines to extract only shared internal borders
+df_shared_borders <- df_plot_map_states_simp %>%
+  ms_innerlines()
+```
+
+```{r mapping federal borders}
+# 1. Get reference shape of Germany (no holes)
+germany_outline <- ne_countries(country = "Germany", returnclass = "sf") %>%
+  st_transform(25832)  # CRS for buffering
+
+# 2. Shrink it inward by 1km
+germany_shrink <- germany_outline %>%
+  st_buffer(-20000)
+
+# 3. Prepare your precise outer borders (assuming in WGS84, reproject first)
+states_union <- df_plot_map_states %>%
+  st_transform(25832) %>%
+  st_make_valid() %>%
+  st_union()
+
+# 4. Intersect the unioned states with the shrunken shape to remove holes
+states_outer_clean <- st_union(states_union, germany_shrink)
+
+# 5. (Optional) Convert back to sf
+states_outer_clean_sf <- st_as_sf(states_outer_clean)
+```

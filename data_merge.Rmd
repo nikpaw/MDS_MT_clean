@@ -1,0 +1,4256 @@
+---
+title: "data_merge"
+author: "Niklas Pawelzik"
+date: "2024-10-22"
+output: html_document
+---
+
+# Combine Data from Hospital Registers (Plankrankenhaus) and Hospital Quality Reports (Hospital Closure)
+This code processes a set of KHV (hospital directory) dataframes, extracts postal codes, filters for specific hospital types (EinrichtungsTyp or Art == 2), and then matches hospital closures to these datasets based on postal codes. It creates a new dataframe, df_hospital_closures_combined_geocoded_continue_match_KHV, where:
+
+Each hospital closure entry is checked for a match in any of the processed KHV datasets.
+A column match_found indicates whether a match exists.
+A column matching_dfs lists the KHV datasets where a match was found, separated by "; "
+```{r to identify matching annual dataframes for KHV and safe them in a column}
+# List all dataframes
+khv_df_names <- c(
+  "df_khv_2008_slim_geocoded", 
+  "df_khv_2009_slim_geocoded",
+  "df_khv_2010_slim_geocoded",
+  "df_khv_2011_slim_geocoded",
+  "df_khv_2012_slim_geocoded",
+  "df_khv_2013_slim_geocoded",
+  "df_khv_2014_slim_geocoded",
+  "df_khv_2015_slim_geocoded",
+  "df_khv_2016_slim_geocoded",
+  # Skip df_khv_2017
+  "df_khv_2018_slim_geocoded",
+  "df_khv_2019_slim_geocoded",
+  "df_khv_2020_slim_geocoded",
+  "df_khv_2021_slim_geocoded",
+  "df_khv_2022_slim_geocoded"
+)
+
+# Define a function to process and filter dataframes dynamically
+process_dataframe <- function(df) {
+  # Add unified Postleitzahl column
+  if ("PLZ" %in% colnames(df)) {
+    df <- df %>% mutate(Postleitzahl = as.character(PLZ))
+  } else if ("Adresse_Postleitzahl_Standort" %in% colnames(df)) {
+    df <- df %>% mutate(Postleitzahl = as.character(Adresse_Postleitzahl_Standort))
+  } else if ("Adresse _Zustellbezogene Postleitzahl und Ort" %in% colnames(df)) {
+    df <- df %>% mutate(Postleitzahl = str_extract(`Adresse _Zustellbezogene Postleitzahl und Ort`, "\\d{5}"))
+  } else {
+    df <- df %>% mutate(Postleitzahl = NA_character_)
+  }
+  
+  # Filter rows with EinrichtungsTyp or Art == 2
+  if ("EinrichtungsTyp" %in% colnames(df)) {
+    df <- df %>% filter(EinrichtungsTyp == 2)
+  } else if ("Art" %in% colnames(df)) {
+    df <- df %>% filter(Art == 2)
+  }
+  
+  return(df)
+}
+
+# Process and filter all dataframes dynamically
+processed_dfs <- lapply(khv_df_names, function(name) {
+  df <- get(name) # Get the dataframe by its name
+  process_dataframe(df) # Process and filter the dataframe
+})
+
+# Name the processed dataframes in the list for easier identification
+names(processed_dfs) <- khv_df_names
+
+# Combine for comparison and add column with matching dataframe names
+df_hospital_closures_combined_geocoded_continue_match_KHV <- df_hospital_closures_info_combined  %>%
+    mutate(
+    match_found = sapply(Postleitzahl, function(plz) {
+      any(sapply(processed_dfs, function(df) plz %in% df$Postleitzahl))
+    }),
+    matching_dfs = sapply(Postleitzahl, function(plz) {
+      matched <- sapply(names(processed_dfs), function(df_name) {
+        df <- processed_dfs[[df_name]]
+        if (plz %in% df$Postleitzahl) df_name else NULL
+      })
+      paste(na.omit(matched), collapse = "; ") # Combine matching dataframe names into a single string separated by "; "
+    })
+  )
+
+# Check results
+df_hospital_closures_combined_geocoded_continue_match_KHV
+
+```
+
+
+This code reads and processes a manually researched text file containing hospital closures matched to the KHV register. It does the following:
+
+Reads the text file (hospital_closures_match_khv_register_plankrankenhaus.txt) into a vector of lines.
+Parses the lines into a dataframe (df_hospital_closures_last_match_khv):
+Extracts postal codes from the beginning of each line.
+Extracts closure-related information from the rest of the line.
+Extracts the year from the closure information:
+Identifies the first four-digit number as the closure year.
+Converts it to an integer (with NA if no year is found).
+Displays the final dataframe containing:
+Postal code
+Closure information
+Year of confirmed last match in the KHV register
+```{r create dataframe for import of khv latest matches}
+# based on the manual research on the matched khv dataframe, 
+# Read the text file
+file_path_hospital_closures_last_match_khv_plankrankenhaus <- "hospital_closures_match_khv_register_plankrankenhaus.txt"
+lines_hospital_closures_last_match_khv_plankrankenhaus <- readLines(file_path_hospital_closures_last_match_khv_plankrankenhaus)
+
+# Parse the lines into a dataframe
+df_hospital_closures_last_match_khv_plankrankenhaus <- data.frame(
+  Postleitzahl = stringr::str_extract(lines_hospital_closures_last_match_khv_plankrankenhaus, "^[0-9]+"), # Extract numeric characters before the first space
+  info_last_match_khv = stringr::str_trim(stringr::str_remove(lines_hospital_closures_last_match_khv_plankrankenhaus, "^[0-9]+\\s+")), # Extract everything after the first space
+  stringsAsFactors = FALSE
+)
+
+# Extract the year from the "info_last_match_khv" column
+df_hospital_closures_last_match_khv_plankrankenhaus <- df_hospital_closures_last_match_khv_plankrankenhaus %>%
+  mutate(
+    year_last_match_khv_confirmed = stringr::str_extract(info_last_match_khv, "\\d{4}"), # Extract first 4-digit year
+    year_last_match_khv_confirmed = as.integer(year_last_match_khv_confirmed) # Convert to integer, NA if not present
+  )
+
+# View the resulting dataframe
+print(df_hospital_closures_last_match_khv_plankrankenhaus)
+
+```
+
+This code performs a left join to merge additional hospital closure details from df_hospital_closures_last_match_khv_plankrankenhaus into df_hospital_closures_combined_geocoded_continue_match_KHV. It does the following:
+
+Selects relevant columns (Postleitzahl, info_last_match_khv, year_last_match_khv_confirmed) from df_hospital_closures_last_match_khv_plankrankenhaus.
+Performs a left join on Postleitzahl, ensuring all records from df_hospital_closures_combined_geocoded_continue_match_KHV remain.
+Merges closure-related information, adding manual confirmation details (info_last_match_khv, year_last_match_khv_confirmed).
+```{r add columns from imported df_hospital_closures_last_match_khv to df_hospital_closures_combined_geocoded_continue_match_KHV}
+# Perform a left join to add columns from df_hospital_closures_last_match_khv
+df_hospital_closures_combined_geocoded_continue_match_KHV_updated <- df_hospital_closures_combined_geocoded_continue_match_KHV %>%
+  left_join(
+    df_hospital_closures_last_match_khv_plankrankenhaus %>%
+      dplyr::select(Postleitzahl, info_last_match_khv, year_last_match_khv_confirmed), # Select relevant columns
+    by = "Postleitzahl", # Join on Postleitzahl
+    multiple = "any"
+    )
+```
+
+```{r}
+# Filter out closures that cannot be confirmed (NA in year_last_match_khv_confirmed or year_of_closure)
+df_confirmed_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  filter(!is.na(year_last_match_khv_confirmed) & !is.na(year_of_closure))
+
+# Create a separate dataframe for excluded cases (NA in year_of_closure)
+df_excluded_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  filter(!is.na(year_last_match_khv_confirmed) & is.na(year_of_closure))
+
+# Print the number of remaining confirmed closures and excluded cases
+cat("Confirmed closures:", nrow(df_confirmed_closures), "\n")
+cat("Excluded closures (uncertain closure year):", nrow(df_excluded_closures), "\n")
+
+years_own_study <- 2010:2020
+# View the dataframes (optional)
+print(df_confirmed_closures %>%
+  filter(year_of_closure %in% years_own_study))
+print(df_excluded_closures)
+
+```
+
+## Excurse: Visualizing Hospital Closures
+```{r visualization of closures confirmed by study and my closures}
+# Define the years covered in each study and statistics
+all_years_of_data <- 2003:2023
+years_preusker <- 2003:2013
+
+
+# Extract number of confirmed closures from own research (convert to numeric and ensure all years are covered)
+own_research_closures <- table(df_confirmed_closures$year_of_closure) * -1
+
+# Convert to a named numeric vector with all years explicitly included (default missing years to 0)
+own_research_closures_full <- setNames(rep(0, length(all_years_of_data)), all_years_of_data)
+own_research_closures_full[names(own_research_closures)] <- own_research_closures
+
+# Official hospital numbers (2002-2023)
+official_hospital_numbers <- c(
+  2221, 2197, 2166, 2139, 2104, 2087, 2083, 2084, 2064, 2045, 2017, 1996, 
+  1980, 1956, 1951, 1942, 1925, 1914, 1903, 1887, 1893, 1874
+)
+
+# Compute annual net change in the number of hospitals (official statistics)
+official_hospital_numbers_annual_change <- diff(official_hospital_numbers)  # Negative values indicate decrease
+
+# Define confirmed closures as per Preusker et al. (negative values to indicate reduction)
+preusker_closures <- c(
+  -12, -10, -4, -7, -8, -1, -5, -4, -7, -10, -6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+)
+
+# Create dataframe with years 2003-2023
+df_hospital_closure_analysis <- tibble(
+  Year = all_years_of_data,
+  
+  # Annual net change in the number of hospital institutions (official statistics)
+  `Official Net Change` = official_hospital_numbers_annual_change,
+  
+  # Annual change in hospital numbers due to confirmed closures (Preusker et al.)
+  `Confirmed Closures Preusker (2003–13)` = preusker_closures,
+  
+  # Annual change in hospital numbers due to confirmed closures (own research)
+  `Confirmed Closures Own Research (2010–20)` = as.numeric(own_research_closures_full[as.character(all_years_of_data)])
+)
+
+# Convert dataframe to long format for visualization
+df_hospital_closure_analysis_long <- df_hospital_closure_analysis %>%
+  pivot_longer(cols = -Year, names_to = "Statistic", values_to = "Change") %>%
+  drop_na()  # Remove rows with NA values before plotting
+
+# Create a histogram to compare all three statistics
+ggplot(df_hospital_closure_analysis_long, aes(x = Year, y = Change, fill = Statistic)) +
+  geom_col(position = "dodge", width = 0.7) +  # Use grouped bars
+  #geom_text(aes(label = Change), position = position_dodge(width = 0.7), vjust = -0.5, size = 3) +  # Add numbers on bars
+  theme_minimal() +
+  scale_fill_manual(
+    values = c(
+      c4a("brewer.dark2", n = 3)
+    )
+    ) +  # Define colors for distinction
+  scale_y_continuous(
+    breaks = seq(-50, 10, by = 5),
+    minor_breaks = NULL
+    ) +  # Y-axis increments every 5
+  scale_x_continuous(
+    limits = c(2002.5, 2020.5),
+    breaks = seq(2003, 2020, by = 1),
+    minor_breaks = NULL
+    ) +
+  labs(
+    title = NULL,
+    x = "Year",
+    y = "Annual Change in Hospital Numbers",
+    fill = NULL
+  ) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(
+    legend.position = "bottom",
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12)
+  )
+ggsave("images/plot_hospital_closures_confirmed.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+
+```{r}
+# Extract relevant subsets from the dataset
+preusker_closures_subset <- df_hospital_closure_analysis %>%
+  filter(Year %in% years_preusker) %>%
+  summarise(total_preusker_closures = sum(`Preusker closures (2003–2013)`, na.rm = TRUE))
+
+own_closures_subset <- df_hospital_closure_analysis %>%
+  filter(Year %in% years_own_study) %>%
+  summarise(total_own_closures = sum(`Own closures (2003–2023)`, na.rm = TRUE))
+
+# Extract net change in hospital numbers from official statistics for corresponding years
+official_net_change_preusker <- df_hospital_closure_analysis %>%
+  filter(Year %in% years_preusker) %>%
+  summarise(total_official_change_preusker = sum(`Official net change`, na.rm = TRUE))
+
+official_net_change_own <- df_hospital_closure_analysis %>%
+  filter(Year %in% years_own_study) %>%
+  summarise(total_official_change_own = sum(`Official net change`, na.rm = TRUE))
+
+# Compute the ratios
+ratio_preusker <- preusker_closures_subset$total_preusker_closures / abs(official_net_change_preusker$total_official_change_preusker)
+ratio_own <- own_closures_subset$total_own_closures / abs(official_net_change_own$total_official_change_own)
+
+# Print results
+cat("Ratio of Preusker-confirmed closures to official net change (2003-2013):", round(ratio_preusker, 2), "\n")
+cat("Ratio of own-confirmed closures to official net change (2010-2020):", round(ratio_own, 2), "\n")
+
+```
+
+
+# Combine Hospital (Closure) Data with Shape Files (ARS)
+This is when the data on hospitals and their closures are combined with data on the municipalities
+```{r}
+# Transformieren der CRS der Krankenhäuser auf die Projektion der Verwaltungsgemeinden
+hospitals_sf <- st_as_sf(df_hospital_location_merged_geocoded, coords = c("longitude", "latitude"), crs = 4326)
+
+# Transformation CRS der Krankenhausdaten in UTM-Koordinatensystem (EPSG:25832)
+#hospitals_sf_utm <- st_transform(hospitals_sf, 25832)
+
+# Transformieren der CRS der Krankenhäuser auf die Projektion der Verwaltungsgemeinden
+hospitals_sf_gemeinde <- st_transform(hospitals_sf, st_crs(shp_flächen_ebene_gemeinde))
+
+# Räumlicher Join
+hospitals_with_gemeinde <- st_join(hospitals_sf_gemeinde, shp_flächen_ebene_gemeinde, join = st_intersects)
+
+# Transformiere zurück zu WGS 84 (EPSG:4326), falls nötig
+hospitals_with_gemeinde <- st_transform(hospitals_with_gemeinde, 4326)
+
+# Auswahl der relevanten Spalten
+hospitals_with_gemeinde <- hospitals_with_gemeinde %>%
+  mutate(longitude = st_coordinates(.)[, 1],
+         latitude = st_coordinates(.)[, 2]) %>%
+  dplyr::select(
+    Name, 
+    IK_Institutionskennzeichen, 
+    Standortnummer, 
+    Standortnummer_alt, 
+    year, 
+    Adresse, 
+    longitude, 
+    latitude, 
+    ARS
+    )
+
+# Umwandeln zurück zu einem DataFrame
+df_hospitals_with_gemeinde <- as.data.frame(hospitals_with_gemeinde)
+
+# Ergebnis anzeigen
+print(df_hospitals_with_gemeinde)
+```
+
+```{r}
+df_confirmed_closures_ARS <- df_confirmed_closures %>%
+  mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen)) %>%
+  left_join(
+    df_hospitals_with_gemeinde %>%
+        mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen)) %>%
+      dplyr::select(IK_Institutionskennzeichen, Standortnummer, year, ARS, geometry), # Select relevant columns for matching
+    by = c("IK_Institutionskennzeichen", "Standortnummer", "year") # Match on these columns
+  ) %>%
+  left_join(
+    df_regiostar_complete %>%
+      dplyr::select(ARS, RegioStaR2, RegioStaR4, RegioStaR4from5, RegioStaR5, RegioStaR6from7, RegioStaR7, RegioStaR17),
+  #rename("ARS" = "vbgemrs_23"), # Select relevant columns for matching
+    by =  "ARS", # Match on these columns
+  #multiple = "first"
+  ) %>%
+  mutate(ARS = as.factor(ARS))
+
+head(df_confirmed_closures_ARS)
+```
+
+
+```{r}
+# Define the years of interest (as characters)
+selected_years <- c("2009", "2010", "2011", "2012", "2013", 
+                    "2014", "2015", "2016", "2017", "2018", "2019")
+
+table(df_regiostar_complete$RegioStaR4from5)
+
+table(df_confirmed_closures_ARS$RegioStaR4from5)
+
+
+# Filter the dataset for the selected years and count by RegioStaR4from5
+df_confirmed_closures_ARS %>%
+  filter(year_of_closure %in% selected_years) %>%
+  pull(RegioStaR4from5) %>%
+  table()
+
+# Filter the dataset for the selected years and count by RegioStaR4from5
+treated_filtered_counts <- df_confirmed_closures_ARS %>%
+  filter(year_of_closure %in% selected_years) %>%
+  pull(RegioStaR4from5) %>%
+  table()
+
+# Count the number of treated units per type
+treated_counts <- table(df_confirmed_closures_ARS$RegioStaR4from5)
+
+# Count the number of total units per type in the full dataset
+total_counts <- table(df_regiostar_complete$RegioStaR4from5)
+
+# Compute the ratio of treated to total units per type (filtered)
+treated_ratio <- treated_counts / total_counts
+treated_ratio_filtered <- treated_filtered_counts / total_counts
+
+# Display the result
+treated_ratio
+treated_ratio_filtered
+```
+
+## Excurse: Comparing Municipalities with Hospital Closures to Muncipalities without Closures
+```{r}
+df_regiostar_complete_closure_indicated <- df_regiostar_complete %>%
+  mutate(
+    hospital_closure = if_else(ARS %in% df_confirmed_closures_ARS$ARS, TRUE, FALSE)
+  )
+
+
+# Check distribution of demographic types in treated & control groups
+df_demographic_distribution_full_data <- df_regiostar_complete_closure_indicated %>%
+#  filter(!year >= 2021) %>%
+  filter(!is.na(RegioStaR6from7)) %>%
+  group_by(ARS) %>%
+  filter(
+#    all(!is.na(employment_level)),  # Ensure complete data for employment_level
+#    all(!is.na(employment_level_female)),  # Ensure complete data for female employment
+#    all(!is.na(employment_level_55_64))  # Ensure complete data for older employment group
+  ) %>%
+  ungroup() %>%
+#  filter(!RegioStaR4from5 == "51/52") %>%
+#  filter(!RegioStaR4from5 == "55") %>%
+  #   filter(!spillover_unit == TRUE) %>%
+#   filter(staff_doctors_nurses_numeric >= 20| treated_unit == 0) %>%
+  distinct(ARS, .keep_all = TRUE) %>%
+#  group_by(RegioStaR17, treated_unit) %>%
+  group_by(RegioStaR6from7, hospital_closure) %>%
+#  group_by(RegioStaR4from5, treated_unit) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = hospital_closure, values_from = count, values_fill = 0) %>%
+   rename(Control = `FALSE`, Treated = `TRUE`) %>%
+   mutate(Total = Control + Treated,
+          Treated_Share_Municipality = scales::percent(Treated / Total, accuracy = 0.01),
+          Treated_Share_Treated = scales::percent(Treated / sum(Treated), accuracy = 0.01)
+          ) %>%
+  mutate(
+    RegioStaR6from7 = case_when(
+      RegioStaR6from7 == "71/72" ~ "Metropolis, Regiopolis or Large City in an Urban Region",
+      RegioStaR6from7 == "73" ~ "Medium-Sized City, Urban Area in an Urban Region",
+      RegioStaR6from7 == "74" ~ "Small-Town Area, Village Area in an Urban Region",
+      RegioStaR6from7 == "75" ~ "Central City in a Rural Region",
+      RegioStaR6from7 == "76" ~ "Medium-Sized City, Urban Area in a Rural Region",
+      RegioStaR6from7 == "77" ~ "Small-Town Area, Village Area in a Rural Region"
+    )
+  ) %>%
+   rename(
+     "Without Hospital Closure" = `Control`,
+     "With Hospital Closure" = `Treated`,
+     "Share with Hospital Closures" = `Treated_Share_Municipality`,
+     "Share of Hospital Closures" = `Treated_Share_Treated`,
+     "Municipality Type" = `RegioStaR6from7`
+     )
+
+
+# Display summary table
+print(df_demographic_distribution_full_data)
+```
+
+
+## Excurse: Mapping Hospital Closures (and Municipality Types)
+```{r create map with hospital closures plotted}
+# Load Germany map data
+de <- map_data("world", region = "Germany") 
+
+# Define variables for mapping aesthetics
+var_color <- "year_of_closure"      # Color variable representing closure year
+var_shape <- "Traegerart" # Currently unused in this plot
+
+# Create a ggplot map of hospital closures in Germany
+map_hospital_closures <- ggplot() +
+  # Add NUTS-3 level regions with dashed borders (municipality level)
+  geom_sf(data = shp_flächen_ebene_gemeinde, color = "grey20", fill = "grey80", 
+          linewidth = 0.5, linetype = "dashed") +
+  # Add NUTS-1 level regions with solid black borders (state level)
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth = 1) +
+  # Add hospital closure locations using jitter to avoid overlapping points
+  geom_point(data = df_confirmed_closures %>% filter(
+    year_of_closure %in% c("2010", "2011", "2012", "2013", "2014", 
+                           "2015", "2016", "2017", "2018", "2019", "2020")
+    ),
+              aes(x = longitude, y = latitude, fill = get(var_color)), shape = 21, stroke = 1.5,
+              size = 3) +
+  # Define a manual color scale for years of hospital closures
+  scale_fill_manual(values = c(
+    "2020" = "darkgreen",
+    "2019" = "orange",
+    "2018" = "purple",
+    "2017" = "yellow",
+    "2016" = "cyan",
+    "2015" = "magenta",
+    "2014" = "green",
+    "2013" = "darkblue",
+    "2012" = "red",
+    "2011" = "brown",
+    "2010" = "blue"
+  )) +
+  # Remove unnecessary background elements for a cleaner map
+  theme_void() +
+  # Add titles and captions
+  labs(
+    title = "Hospital Closures in Germany between 2010 and 2020",
+    subtitle = "Based on last appearance in Hospital Quality Reports, NUTS-3 Regions",
+    caption = "Source: Hospital Quality Reports and own research"
+  )
+
+# Display the map
+print(map_hospital_closures)
+```
+
+```{r}
+df_plot_map_hospital_closures_municipality <- df_regiostar_with_gemeinde %>%
+  mutate(
+    RegioStaR4from5 = case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region - Metropolis / Large City",
+      RegioStaR4from5 == "53" ~ "Urban Region - Surrounding Area",
+      RegioStaR4from5 == "54" ~"Rural Region - City or Urban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region - Small-Town Area or Village Area"  
+    )
+  )
+
+plot_map_hospital_closures_municipality <- ggplot(data = df_plot_map_hospital_closures_municipality) +
+  geom_sf(aes(color = as.factor(RegioStaR4from5)), color = "black", fill =  NA, linewidth = 0.01) +
+  geom_sf(aes(fill = as.factor(RegioStaR4from5)), color = NA, alpha = 0.8) +
+  geom_sf(data = states_outer_clean_sf, color = "black", fill = NA, linewidth = .5) +
+  geom_sf(data = df_shared_borders, color = "black", fill = NA, linewidth = .5) +
+#  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth = 1) +
+  geom_point(data = df_confirmed_closures %>% filter(
+    year_of_closure %in% c("2010", "2011", "2012", "2013", "2014",
+                           "2015", "2016", "2017", "2018", "2019", "2020")
+    ),
+              aes(x = longitude, y = latitude, fill = get(var_color)), shape = 21, stroke = .5,
+              size = 1.75) +
+  # Define a manual color scale for years of hospital closures
+  scale_fill_manual(values = c(
+    # "2020" = "#8DD3C7",
+    # "2019" = "#FFFFB3",
+    # "2018" = "#BEBADA",
+    # "2017" = "#FB8072",
+    # "2016" = "#80B1D3",
+    # "2015" = "#FDB462",
+    # "2014" = "#B3DE69",
+    # "2013" = "#FCCDE5",
+    # "2012" = "#D9D9D9",
+    # "2011" = "#BC80BD",
+    # "2010" = "#CCEBC5",
+
+
+    "2020" = "darkgrey",
+    "2019" = "orange",
+    "2018" = "purple",
+    "2017" = "yellow",
+    "2016" = "deepskyblue",
+    "2015" = "magenta",
+    "2014" = "chartreuse",
+    "2013" = "darkblue",
+    "2012" = "red",
+    "2011" = "brown",
+    "2010" = "white",
+
+    
+  "Urban Region - Surrounding Area" = colorspace::lighten("#6A3D9A", amount = 0.8),   # lighter purple
+  "Urban Region - Metropolis / Large City" = "#6A3D9A",  # darker purple
+  "Rural Region - Small-Town Area or Village Area" = colorspace::lighten("#B15928", amount = 0.8),   # lighter brown
+  "Rural Region - City or Urban Area" = "#B15928"   # darker brown
+
+
+    
+    # "Urban Region - Metropolis / Large City" = "#6A3D9A",
+    # "Urban Region - Surrounding Area" = "#CAB2D6",  # Lighter Blue (Urban-Umland)
+    # "Rural Region - City or Urban Area" = "#B15928",  # Darker Green (Rural-City: Central Town)
+    # "Rural Region -  Small-Town Area or Village Area" = "#FFFF99"   # Lighter Green (Rural-Umland)
+  )) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove gridlines
+    axis.text = element_blank(),    # Remove axis text
+    axis.ticks = element_blank(),   # Remove axis ticks
+    panel.border = element_blank(), # Optional: removes border
+    legend.position = "right"       # Optional: control legend placement
+  ) +
+  labs(
+    title = NULL,
+    fill = "Municipality Type / Year of Hospital Closure",
+    x = NULL,  # Remove x-axis label
+    y = NULL   # Remove y-axis label
+  )
+
+ggsave("images/plot_map_hospital_closures_confirmed_municipality_type.pdf",
+       plot = plot_map_hospital_closures_municipality,
+       device = cairo_pdf,
+       width = 8, height = 6)
+
+plot_map_hospital_closures_municipality
+```
+
+## Excurse: Table Closures with Reasons
+```{r}
+new_df_table <- df_confirmed_closures %>%
+  dplyr::select(
+    Name,
+    IK_Institutionskennzeichen,
+    closure_context_info,
+    year_of_closure
+  ) %>%
+  filter(
+    year_of_closure %in% years_own_study)
+
+colnames(new_df_table)
+head(new_df_table)
+```
+
+```{r}
+
+
+
+new_df_table_export <- new_df_table %>%
+  mutate(`link to media coverage` = str_extract(closure_context_info, "https?://[^ ]+"),
+         `link to media coverage` = paste0("\\\\url{", `link to media coverage`, "}")) %>%
+  dplyr::select(
+    -closure_context_info
+  )
+
+
+
+
+cat(kable(new_df_table_export, format = "latex", booktabs = TRUE))
+
+
+```
+
+
+# Combine Employment Data with Shape Files (ARS) and Hospital Closure Data
+```{r}
+dataframe_dependent_variables_shapes <- dataframe_dependent_variables %>%  
+  mutate(ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0"))  %>%# Ensure both match
+#  rename("ARS" = "vbgemrs_23") %>%
+  inner_join(df_regiostar_with_gemeinde, 
+    by = "ARS"
+    ) %>%
+  mutate(
+    hospital_closure = ARS %in% df_confirmed_closures_ARS$ARS
+    )
+  
+df_combined_hospital_data_employment <-  df_confirmed_closures_ARS %>%
+  mutate(
+    ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0")
+    ) %>%
+  dplyr::select(
+    -dplyr::starts_with("Regio")
+  ) %>%
+  right_join(
+    dataframe_dependent_variables_shapes,
+    by ="ARS",
+    Keep
+  ) %>%
+    rename(
+      geometry_hospital = geometry.x,
+      geometry_municipality = geometry.y
+    )
+
+head(dataframe_dependent_variables_shapes)
+head(df_combined_hospital_data_employment)
+table(nchar(unique(as.character(dataframe_dependent_variables$ARS))))
+table(nchar(unique(as.character(dataframe_dependent_variables_shapes$ARS))))
+```
+
+```{r}
+# Count NAs in employment_level for each year
+na_distribution <- dataframe_dependent_variables_shapes %>%
+  group_by(Year) %>%
+  summarise(NA_count = sum(is.na(employment_level)),
+            Total = n(),
+            NA_percentage = (NA_count / Total) * 100)
+
+# Print the result
+print(na_distribution)
+
+```
+
+
+```{r}
+# Compute average values grouped by RegioStaR4from5 and Year
+average_employment_by_group <- dataframe_dependent_variables_shapes %>%
+  group_by(RegioStaR4from5, Year) %>%
+  summarise(
+    avg_employment_level = mean(employment_level, na.rm = TRUE),
+    avg_employment_level_female = mean(employment_level_female, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Save the result as a new dataframe
+average_employment_by_group_df <- as.data.frame(average_employment_by_group)
+
+# Display the result
+print(average_employment_by_group_df)
+
+```
+
+```{r}
+# Ensure Year is treated as a numeric variable for proper plotting
+average_employment_by_group_df <- average_employment_by_group_df %>%
+  mutate(Year = as.numeric(Year))
+
+# Plot 1: Overall Employment Level
+plot1 <- ggplot(average_employment_by_group_df, aes(x = Year, y = avg_employment_level, color = RegioStaR4from5)) +
+  geom_line(linewidth = 1) + 
+  geom_point(size = 2) +
+  labs(title = "Average Employment Level Over Time by Municipality Type",
+       x = "Year",
+       y = "Employment Level (%)") +
+  theme_minimal()
+
+# Plot 2: Female Employment Level
+plot2 <- ggplot(average_employment_by_group_df, aes(x = Year, y = avg_employment_level_female, color = RegioStaR4from5)) +
+  geom_line(linewidth = 1) + 
+  geom_point(size = 2) +
+  labs(title = "Average Female Employment Level Over Time by Municipality Type",
+       x = "Year",
+       y = "Female Employment Level (%)") +
+  theme_minimal()
+
+
+# Display plots
+print(plot1)
+print(plot2)
+
+```
+
+```{r}
+ggplot(data = df_combined_hospital_data_employment) +
+  geom_sf(aes(fill = as.factor(RegioStaR4from5), geometry = geometry_municipality), color = "black", linewidth = 0.1, alpha = 0.7) +
+    geom_sf(data = SHP_1, color = "black", fill = NA, linewidth = 1) +
+  # scale_fill_manual(
+  #   values = c(
+  #     "51/52" = "#08519c",  # Blue (Urban - city)
+  #     "53" = "#6baed6",  # Lighter Blue (Urban - umland)
+  #     "54" = "#31a354",  #Green (Rural - city)
+  #     "55" = "#c7e9c0"   # Lightest Green (Rural - umland)
+  #   )) +
+    geom_point(data = df_confirmed_closures %>% filter(
+    year_of_closure %in% c("2010", "2011", "2012", "2013", "2014",
+                           "2015", "2016", "2017", "2018", "2019", "2020")
+    ),
+              aes(x = longitude, y = latitude, fill = get(var_color)), shape = 21, stroke = 1.5,
+              size = 3) +
+  # Define a manual color scale for years of hospital closures
+  scale_fill_manual(values = c(
+    "2020" = "darkgreen",
+    "2019" = "orange",
+    "2018" = "purple",
+    "2017" = "yellow",
+    "2016" = "cyan",
+    "2015" = "magenta",
+    "2014" = "green",
+    "2013" = "darkblue",
+    "2012" = "red",
+    "2011" = "brown",
+    "2010" = "blue",
+      "51/52" = "#08519c",  # Blue (Urban - city)
+      "53" = "#6baed6",  # Lighter Blue (Urban - umland)
+      "54" = "#31a354",  #Green (Rural - city)
+      "55" = "#c7e9c0"   # Lightest Green (Rural - umland)
+  )) +
+  theme_minimal() +
+  labs(
+    title = "Municipalities Colored by RegioStaR4from5 Categories",
+    fill = "Municipality Type"
+  )
+```
+
+## Excurse: Combine Covariates with Shape Files (ARS) and Hospital Closure Data
+```{r}
+df_covariates_combined_shapes <- df_covariates_combined %>%  
+  mutate(ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0"))  %>%# Ensure both match
+#  rename("ARS" = "vbgemrs_23") %>%
+  inner_join(df_regiostar_with_gemeinde, 
+    by = "ARS"
+    ) %>%
+  mutate(
+    hospital_closure = ARS %in% df_confirmed_closures_ARS$ARS
+    )
+  
+df_combined_hospital_data_covariates <-  df_confirmed_closures_ARS %>%
+  mutate(
+    ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0")
+    ) %>%
+  dplyr::select(
+    -dplyr::starts_with("Regio")
+  ) %>%
+  right_join(
+    df_covariates_combined_shapes,
+    by ="ARS",
+    Keep
+  ) %>%
+    rename(
+      geometry_hospital = geometry.x,
+      geometry_municipality = geometry.y
+    )
+
+head(df_covariates_combined_shapes)
+head(df_covariates_combined)
+table(nchar(unique(as.character(df_covariates_combined$ARS))))
+table(nchar(unique(as.character(df_covariates_combined_shapes$ARS))))
+```
+
+```{r}
+df_combined_hospital_data_covariates %>%
+  group_by(RegioStaR4from5, hospital_closure) %>%
+  summarise(
+    across(where(is.numeric), ~ mean(.x, na.rm = TRUE)),
+    n = n(),
+    .groups = "drop"
+  )
+
+
+ggplot(df_combined_hospital_data_covariates, aes(x = core_budget_debt_per_capita, fill = as.factor(hospital_closure))) +
+  geom_density(alpha = 0.5) +
+  facet_wrap("RegioStaR4from5") +
+  labs(fill = "Hospital Closure", title = "Core Budget Debt per Capita")
+
+df_combined_hospital_data_covariates %>%
+  group_by(RegioStaR2) %>%
+  summarise(
+    t_stat = t.test(core_budget_debt_per_capita ~ hospital_closure)$statistic,
+    p_value = t.test(core_budget_debt_per_capita ~ hospital_closure)$p.value
+  )
+```
+
+```{r}
+# Step 1: Select relevant numeric covariates
+covariate_cols <- c(
+  "core_budget_debt_per_capita",
+  "tax_revenue_per_capita",
+  "net_funds_balance_per_capita",
+  "highly_qualified_residents",
+  "marginal_employment_per_1000_residents",
+  "unemployment_benefit_ii_rate",
+  "unemployed_sv_insured_under_25"
+)
+
+# Reshape to long format
+df_long_covs <- df_combined_hospital_data_covariates %>%
+  select(RegioStaR2, hospital_closure, all_of(covariate_cols)) %>%
+  pivot_longer(
+    cols = all_of(covariate_cols),
+    names_to = "covariate",
+    values_to = "value"
+  )
+
+df_long_covs <- df_long_covs %>%
+  mutate(value = log10(value + 1))  # Add +1 to avoid log(0)
+
+pvals <- df_long_covs %>%
+  group_by(RegioStaR2, covariate) %>%
+  summarise(
+    p_value = tryCatch(
+      t.test(value ~ hospital_closure)$p.value,
+      error = function(e) NA_real_
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    significance = case_when(
+      is.na(p_value) ~ "NA",
+      p_value < 0.001 ~ "***",
+      p_value < 0.01  ~ "**",
+      p_value < 0.05  ~ "*",
+      TRUE ~ ""
+    )
+  )
+
+df_plot_annotated <- df_long_covs %>%
+  left_join(pvals, by = c("RegioStaR2", "covariate"))
+
+# Normalize (z-score) the covariates across the full sample
+df_normalized_long <- df_combined_hospital_data_covariates %>%
+  select(RegioStaR2, hospital_closure, all_of(covariate_cols)) %>%
+  pivot_longer(cols = all_of(covariate_cols), names_to = "covariate", values_to = "value_raw") %>%
+  group_by(covariate) %>%
+  mutate(
+    value = scale(value_raw)[, 1]  # Convert to numeric vector
+  ) %>%
+  ungroup()
+
+ggplot(df_plot_annotated, aes(x = as.factor(hospital_closure), y = value, fill = as.factor(hospital_closure))) +
+  geom_boxplot(outlier.size = 0.7, width = 0.6) +
+  facet_grid(RegioStaR2 ~ covariate, scales = "free_y", labeller = label_both) +
+  geom_text(
+    data = . %>% distinct(RegioStaR2, covariate, significance),
+    aes(label = significance),
+    x = 1.5, y = Inf, vjust = 1.2, size = 3,
+    inherit.aes = FALSE
+  ) +
+  labs(
+    title = "Covariate Distribution by Treatment Status (Boxplot)",
+    x = "Hospital Closure",
+    y = "Value",
+    fill = "Hospital Closure"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 8),
+    legend.position = "none"
+  )
+
+ggplot(df_normalized_long, aes(x = as.factor(hospital_closure), y = value, fill = as.factor(hospital_closure))) +
+  geom_boxplot(outlier.size = 0.7, width = 0.6) +
+  facet_grid(RegioStaR2 ~ covariate, scales = "free_y") +
+  labs(
+    title = "Standardized Covariate Distributions by Treatment and Region Type",
+    x = "Hospital Closure (0 = Control, 1 = Treated)",
+    y = "Standardized Value (Z-Score)",
+    fill = "Hospital Closure"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 8),
+    legend.position = "none"
+  )
+
+```
+
+
+# Accounting for Spill-Overs: Identify Treated, Spillover, Control, Unclear Treatment Status, Unclear Spillover Status
+
+```{r}
+df_excluded_closures_ARS <- df_excluded_closures %>%
+  left_join(
+    df_hospitals_with_gemeinde %>%
+      select(
+        ARS,
+        longitude,
+        latitude
+      ),
+    by = c("longitude", "latitude"),
+    multiple = "any"
+  )
+
+df_regiostar_complete_closure_indicated_unclear_defined <- df_regiostar_with_gemeinde %>%
+  mutate(
+    hospital_closure = if_else(ARS %in% df_confirmed_closures_ARS$ARS, TRUE, FALSE),
+    unclear_hospital_closure = if_else(ARS %in% df_excluded_closures_ARS$ARS, TRUE, FALSE)
+  ) %>%
+  mutate(
+    binary_potential_hospital_closure = case_when(
+      unclear_hospital_closure == TRUE ~ TRUE,
+      hospital_closure == TRUE ~ TRUE,
+      TRUE ~ FALSE
+    )
+    ) %>%
+  mutate(
+    non_binary_potential_hospital_closure = case_when(
+      unclear_hospital_closure == TRUE ~ "Unclear Treatment Status",
+      hospital_closure == TRUE ~ "Treated",
+      TRUE ~ "Control"
+    )
+  )
+```
+
+
+```{r}
+df_CS_model_preparation_unqiue <- df_regiostar_complete_closure_indicated_unclear_defined %>%
+    distinct(ARS, .keep_all = TRUE) %>%
+  filter(!st_is_empty(geometry))  # Exclude empty geometries
+
+nb_unique <- poly2nb(df_CS_model_preparation_unqiue$geometry, queen = TRUE)
+
+# Convert to adjacency matrix
+adjacency_matrix_unique <- nb2mat(nb_unique, style = "B", zero.policy = TRUE)
+
+df_prep_spillover_unique <- df_CS_model_preparation_unqiue %>%
+  mutate(
+    treated_unit = binary_potential_hospital_closure
+  )
+
+# Assign neighboring units for each ASR
+df_prep_spillover_unique$neighbors <- sapply(1:nrow(adjacency_matrix_unique), function(i) {
+  which(adjacency_matrix_unique[i, ] == 1)
+})
+
+
+df_prep_spillover_unique_2 <- df_prep_spillover_unique %>%
+  mutate(
+    spillover_unit = purrr::map_lgl(neighbors, ~ any(df_prep_spillover_unique$treated_unit[.x] == 1))
+  ) %>%
+  mutate(
+    treatment_status_spillover = case_when(
+      spillover_unit == TRUE ~ "spillover",
+      treated_unit == 1 ~ "direct_treated",
+      TRUE ~ "control"
+    )
+  ) %>%
+  mutate(
+    treatment_status_spillover = 
+      ifelse(is.na(treated_unit), NA, treatment_status_spillover)
+  )%>%
+  mutate(
+    spillover_unit = 
+      ifelse(treated_unit == TRUE, FALSE, spillover_unit)
+  ) %>%
+  mutate(
+    treatment_status_spillover = 
+      ifelse(treated_unit == TRUE, "direct_treated", treatment_status_spillover)
+  ) %>%
+  mutate(
+    treatment_status_spillover =
+      ifelse(non_binary_potential_hospital_closure == "Unclear Treatment Status", "unclear treatment status", treatment_status_spillover)
+  )
+
+
+df_combined_hospital_data_employment_enriched <- df_combined_hospital_data_employment %>%
+  left_join(df_prep_spillover_unique_2 %>% 
+              distinct(ARS, .keep_all = TRUE) %>%
+              select(
+                treatment_status_spillover,
+                ARS
+              ),
+            by = "ARS"
+  )
+
+table(
+  df_combined_hospital_data_employment_enriched %>%
+    distinct(ARS, .keep_all = TRUE) %>%
+    pull(treatment_status_spillover)
+)
+
+table(df_prep_spillover_unique_2$treatment_status_spillover)
+```
+
+```{r plot confirmed treated and their spillover}
+df_plot_map_treatment_spillover_municipality <- df_combined_hospital_data_employment_enriched %>%
+  mutate(
+    treatment_status_spillover = case_when(
+      treatment_status_spillover == "direct_treated" ~ "Unit With Direct Treatment",
+      treatment_status_spillover == "control" ~ "Control Unit",
+      treatment_status_spillover == "spillover" ~"(Potential) Spillover Unit",
+      treatment_status_spillover == "unclear treatment status" ~ "Unit With Unclear Treatment Status"  
+    )
+  )
+
+plot_map_treatment_spillover_municipality <- ggplot(data = df_plot_map_treatment_spillover_municipality%>%
+  distinct(ARS, .keep_all = TRUE)) +
+  geom_sf(data = df_plot_map_hospital_closures_municipality %>% 
+              distinct(ARS, .keep_all = TRUE), aes(color = as.factor(RegioStaR4from5)), color = "grey80", fill =  NA, linewidth = 0.00001) +
+  geom_sf(aes(fill = treatment_status_spillover, geometry = geometry_municipality)) + # Use "treated_unit" to define fill colors
+  geom_sf(data = states_outer_clean_sf, color = "black", fill = NA, linewidth = .5) +
+  geom_sf(data = df_shared_borders, color = "black", fill = NA, linewidth = .5) +
+  theme_minimal() +
+  theme(
+    panel.grid = element_blank(),   # Remove gridlines
+    axis.text = element_blank(),    # Remove axis text
+    axis.ticks = element_blank(),   # Remove axis ticks
+    panel.border = element_blank(), # Optional: removes border
+    legend.position = "right"       # Optional: control legend placement
+  ) +
+  scale_fill_manual(values = c(
+    "Unit With Direct Treatment" = "#88CCEE",
+    "Control Unit" = "#117733",
+    "(Potential) Spillover Unit" = "#DDCC77",
+    "Unit With Unclear Treatment Status" = "#CC6677"
+    # check alternative fill: brewer.dark2
+    )) +
+  labs(
+    title = NULL,
+    fill = "Classification of Municipalities \n(With Sufficient Data)" # Legend title
+  )
+
+ggsave("images/plot_map_treatment_spillover_control.pdf",
+       plot = plot_map_treatment_spillover_municipality,
+       width = 8, height = 6)
+
+plot_map_treatment_spillover_municipality
+```
+
+
+# Callaway, SantAnna “Difference-in-Differences with multiple time periods”
+
+## Setting up dataframe to Run Model
+```{r}
+df_CS_model_preparation <- df_combined_hospital_data_employment_enriched %>%
+  filter(
+      treatment_status_spillover == "control" |
+      treatment_status_spillover == "direct_treated"
+  ) %>%
+  mutate(
+  ARS = as.numeric(ARS),
+  year_of_closure = as.numeric(as.character(year_of_closure)),
+  year_of_closure = ifelse(is.na(year_of_closure), 0, year_of_closure),
+  # post_treatment = ifelse(
+  #   !year_of_closure == 0 & Year >= year_of_closure, 1, 0
+  #   )
+  )
+```
+
+
+### Excurse: Assessing Balancing of DiD-Sample and Comparing it to Complete Sample
+```{r Matching (with stratification by demographic type), Matchit}
+# identify demographic type distribution among treated units
+# Check distribution of demographic types in treated & control groups
+df_demographic_distribution_did <- df_CS_model_preparation %>%
+  filter(!Year >= 2021) %>%
+  filter(!is.na(RegioStaR6from7)) %>%
+  group_by(ARS) %>%
+  filter(
+    all(!is.na(employment_level)),  # Ensure complete data for employment_level
+    all(!is.na(employment_level_female)),  # Ensure complete data for female employment
+#    all(!is.na(employment_level_55_64))  # Ensure complete data for older employment group
+  ) %>%
+  ungroup() %>%
+  distinct(ARS, .keep_all = TRUE) %>%
+#  group_by(RegioStaR17, treated_unit) %>%
+  group_by(RegioStaR6from7, hospital_closure) %>%
+#  group_by(RegioStaR4from5, treated_unit) %>%
+  summarize(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = hospital_closure, values_from = count, values_fill = 0) %>%
+   rename(Control = `FALSE`, Treated = `TRUE`) %>%
+   mutate(Total = Control + Treated,
+          Treated_Share_Municipality = scales::percent(Treated / Total, accuracy = 0.01),
+          Treated_Share_Treated = scales::percent(Treated / sum(Treated), accuracy = 0.01)
+          ) %>%
+  mutate(
+    RegioStaR6from7 = case_when(
+      RegioStaR6from7 == "71/72" ~ "Metropolis, Regiopolis or Large City in an Urban Region",
+      RegioStaR6from7 == "73" ~ "Medium-Sized City, Urban Area in an Urban Region",
+      RegioStaR6from7 == "74" ~ "Small-Town Area, Village Area in an Urban Region",
+      RegioStaR6from7 == "75" ~ "Central City in a Rural Region",
+      RegioStaR6from7 == "76" ~ "Medium-Sized City, Urban Area in a Rural Region",
+      RegioStaR6from7 == "77" ~ "Small-Town Area, Village Area in a Rural Region"
+    )
+  ) %>%
+   rename(
+     "Without Hospital Closure" = `Control`,
+     "With Hospital Closure" = `Treated`,
+     "Share with Hospital Closures" = `Treated_Share_Municipality`,
+     "Share of Hospital Closures" = `Treated_Share_Treated`,
+     "Municipality Type" = `RegioStaR6from7`
+     )
+
+print(df_demographic_distribution_did)
+
+# Add an identifier column to each dataset
+df_demographic_distribution_full_data <- df_demographic_distribution_full_data %>%
+  mutate(Sample = "Full Dataset")
+
+df_demographic_distribution_did <- df_demographic_distribution_did %>%
+  mutate(Sample = "DiD Sample Only")
+
+# Combine both datasets and sort correctly
+df_combined_demographic_distribution <- bind_rows(
+  df_demographic_distribution_full_data, 
+  df_demographic_distribution_did
+) %>%
+  arrange("Municipality Type", desc(Sample))  # Ensure correct interleaving
+
+# Display the table
+print(df_combined_demographic_distribution)
+
+# Merge both datasets by Municipality Type
+df_bracket_approach <- df_demographic_distribution_full_data %>%
+  rename_with(~ paste0(.x, "_full"), -`Municipality Type`) %>%
+  inner_join(
+    df_demographic_distribution_did %>%
+      rename_with(~ paste0(.x, "_did"), -`Municipality Type`),
+    by = "Municipality Type"
+  ) %>%
+  # Format the values with brackets
+  mutate(
+    `Without Hospital Closure` = paste0(`Without Hospital Closure_full`, " (", `Without Hospital Closure_did`, ")"),
+    `With Hospital Closure` = paste0(`With Hospital Closure_full`, " (", `With Hospital Closure_did`, ")"),
+    `Total` = paste0(`Total_full`, " (", `Total_did`, ")"),
+    `Share with Hospital Closures` = paste0(`Share with Hospital Closures_full`, " (", `Share with Hospital Closures_did`, ")"),
+    `Share of Hospital Closures` = paste0(`Share of Hospital Closures_full`, " (", `Share of Hospital Closures_did`, ")")
+  ) %>%
+  # Keep only relevant columns
+  select(`Municipality Type`, `Without Hospital Closure`, `With Hospital Closure`, `Total`, 
+         `Share with Hospital Closures`, `Share of Hospital Closures`)
+
+# Print final formatted table
+print(df_bracket_approach)
+```
+
+### Excurse: Visualizing Parallel Trends
+
+
+```{r}
+# Prepare data: Compute average employment level per year, separated by municipality type
+df_parallel_trends <- df_CS_model_preparation %>%
+  filter(!Year >= 2021) %>%
+  filter(!is.na(RegioStaR6from7)) %>%
+  group_by(ARS) %>%
+  filter(
+    all(!is.na(employment_level)),  # Ensure complete data for employment_level
+#    all(!is.na(employment_level_female)),  # Ensure complete data for female employment
+#    all(!is.na(employment_level_55_64))  # Ensure complete data for older employment group
+  ) %>%
+  ungroup() %>%
+  filter(treatment_status_spillover %in% c("direct_treated", "control")) %>%  # Exclude spillover units
+  mutate(
+    treated_pre = ifelse(treatment_status_spillover == "direct_treated" & Year < year_of_closure, "Treated (Pre-Treatment)", NA),
+    group = case_when(
+      treatment_status_spillover == "control" ~ "Non-Treated",
+      treatment_status_spillover == "direct_treated" & Year < year_of_closure ~ "Treated (Pre-Treatment)"
+    )
+  ) %>%
+  filter(!is.na(group)) %>%  # Remove post-treatment treated observations
+  group_by(Year, group, RegioStaR4from5) %>%
+  summarise(avg_employment = mean(employment_level, na.rm = TRUE), .groups = "drop")
+
+# Extract individual trajectories for treated units
+df_individual_trajectories <- df_CS_model_preparation %>%
+  filter(treatment_status_spillover == "direct_treated") %>%  # Only include treated units
+  filter(Year < year_of_closure) %>%  # Only pre-treatment
+  select(ARS, Year, employment_level, RegioStaR4from5)
+
+# Plot parallel trends with individual treated unit trajectories
+ggplot() +
+  # Add individual treated unit trajectories (faded for less prominence)
+  geom_line(data = df_individual_trajectories, aes(x = Year, y = employment_level, group = ARS),
+            color = "gray50", alpha = 0.3, linewidth = 0.5) +
+  
+  # Add mean trends for treated (pre-treatment) and non-treated groups
+  geom_line(data = df_parallel_trends, aes(x = Year, y = avg_employment, color = group, group = group), linewidth = 1) +
+  geom_point(data = df_parallel_trends, aes(x = Year, y = avg_employment, color = group, group = group), size = 2) +
+  
+  # Separate plots by municipality type
+  facet_wrap(~ RegioStaR4from5) +  
+
+  # Labels and theme
+  labs(
+    title = "Parallel Trends: Employment Level Over Time",
+    subtitle = "Comparing Directly Treated (Pre-Treatment) vs. Non-Treated Units",
+    x = "Year",
+    y = "Average Employment Level",
+    color = "Group"
+  ) +
+  scale_color_manual(values = c("Treated (Pre-Treatment)" = "blue", "Non-Treated" = "red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+```
+
+```{r}
+# Prepare data: Compute average employment levels per year, separated by municipality type and employment type
+df_parallel_trends <- df_CS_model_preparation %>%
+  filter(!Year >= 2021) %>%
+  group_by(ARS) %>%
+  filter(
+    all(!is.na(employment_level)),  
+    all(!is.na(employment_level_female))  
+  ) %>%
+  ungroup() %>%
+  filter(treatment_status_spillover %in% c("direct_treated", "control")) %>%  # Exclude spillover units
+  mutate(
+    treated_pre = ifelse(treatment_status_spillover == "direct_treated" & Year < year_of_closure, "Treated (Pre-Treatment)", NA),
+    group = case_when(
+      treatment_status_spillover == "control" ~ "Non-Treated",
+      treatment_status_spillover == "direct_treated" & Year < year_of_closure ~ "Treated (Pre-Treatment)"
+    )
+  ) %>%
+  filter(!is.na(group)) %>%  # Remove post-treatment treated observations
+  group_by(Year, group, RegioStaR4from5) %>%
+  summarise(
+    employment = mean(employment_level, na.rm = TRUE),
+    employment_female = mean(employment_level_female, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  pivot_longer(cols = c(employment, employment_female), 
+               names_to = "Employment_Type", 
+               values_to = "Employment_Value") %>%
+  rename(
+     identifier = group
+  ) %>%
+  mutate(
+      Employment_Type = case_when(
+      Employment_Type == "employment" ~ "employment_level",
+      Employment_Type == "employment_female" ~ "employment_level_female")
+  )
+
+
+# Extract individual trajectories for treated units
+df_individual_trajectories <- df_CS_model_preparation %>%
+  filter(treatment_status_spillover == "direct_treated") %>%  # Only include treated units
+  filter(Year < year_of_closure) %>%  # Only pre-treatment
+  select(ARS, Year, employment_level, employment_level_female, RegioStaR4from5) %>%
+  pivot_longer(cols = c(employment_level, employment_level_female), 
+               names_to = "Employment_Type", 
+               values_to = "Employment_Value") %>%
+  rename(
+     identifier = ARS
+  ) %>%
+  mutate(
+      Employment_Type = case_when(
+      Employment_Type == "employment_level" ~ "Overall Employment",
+      Employment_Type == "employment_level_female" ~ "Female Employment")
+  ) %>%
+  mutate(
+      RegioStaR4from5 = case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region: \nMetropolis, \nLarge City",
+      RegioStaR4from5 == "53" ~ "Urban Region: \nSurrounding Area",
+      RegioStaR4from5 == "54" ~ "Rural Region: \nCity, \nUrban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region: \nSmall-Town, \nVillage Area")
+  )
+
+df_parallel_trends <- df_parallel_trends %>%
+  mutate(
+      Employment_Type = case_when(
+      Employment_Type == "employment_level" ~ "Overall Employment",
+      Employment_Type == "employment_level_female" ~ "Female Employment")
+  ) %>%
+  mutate(
+      RegioStaR4from5 = case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region: \nMetropolis, \nLarge City",
+      RegioStaR4from5 == "53" ~ "Urban Region: \nSurrounding Area",
+      RegioStaR4from5 == "54" ~ "Rural Region: \nCity, \nUrban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region: \nSmall-Town, \nVillage Area")
+  )
+
+# Plot parallel trends with individual treated unit trajectories
+plot_parallel_trends_complete <- ggplot() +
+  # Add individual treated unit trajectories (faded for less prominence)
+  geom_line(data = df_individual_trajectories, 
+            aes(x = Year, y = Employment_Value, group = identifier), 
+            color = "gray50", alpha = 0.4, linewidth = .75) +
+
+  # Add mean trends for treated (pre-treatment) and non-treated groups
+  geom_line(data = df_parallel_trends, 
+            aes(x = Year, y = Employment_Value, color = identifier, group = identifier), linewidth = 1) +
+  geom_point(data = df_parallel_trends, 
+             aes(x = Year, y = Employment_Value, color = identifier, group = identifier), size = 2.5) +
+
+  # Separate plots by municipality type and employment type
+  facet_grid(Employment_Type ~ RegioStaR4from5) +  
+
+  # Labels and theme
+  labs(
+    title = NULL,
+    subtitle = NULL,
+    caption = "Gray lines represent individual treated units until closure occurence",
+    x = "Year",
+    y = "Average Employment Level",
+    color = "Group"
+  ) +
+  scale_color_manual(
+    values = c(
+      c4a(palette = "brewer.dark2")
+    )
+      # check alternative fill: brewer.dark2
+    ) +
+    # Axes and labels
+  scale_y_continuous(
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(2010, 2020, by = 5),
+    minor_breaks = seq(2005, 2020, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 12, face = "bold"),
+      plot.caption = element_text(size = 12)
+  )
+
+plot_parallel_trends_complete
+
+ggsave("images/plot_parallel_trends.png",
+       width = 8, height = 6, dpi = 300)
+```
+
+## Estimation for Employment Overall
+### Baseline DR Model Estimation
+
+```{r run model and estimation}
+# Step 1: Estimate ATT using att_gt
+CS_baseline_DR_results <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0                         
+)
+
+# Step 2: Compute dynamic ATT
+CS_baseline_DR_dynamic_effect <- aggte(
+  CS_baseline_DR_results, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_baseline_DR_simple_effect <- aggte(
+  CS_baseline_DR_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_baseline_DR_dynamic_data <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store for future use
+CS_baseline_DR_results_combined <- list(
+  att_model = CS_baseline_DR_results,
+  dynamic_effect = CS_baseline_DR_dynamic_effect,
+  simple_effect = CS_baseline_DR_simple_effect
+)
+
+CS_baseline_DR_simple_effect
+CS_baseline_DR_dynamic_data
+```
+
+```{r}
+check_naming_ci <- CS_baseline_DR_dynamic_data %>%
+  mutate(
+    ci_lower_1.96 = estimate - 1.96 * std.error,
+    ci_upper_1.96 = estimate + 1.96 * std.error
+  )
+
+check_naming_ci
+
+-0.4982 - 1.96 * 0.1793
+-0.4982 + 1.96 * 0.1793
+  
+-0.4982 - 1.96 * 0.1821
+-0.4982 + 1.96 * 0.1821  
+```
+
+
+```{r polished plot}
+# Step 1: Create a pre/post treatment indicator
+df_did_full_DR <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 2: Create the plot
+plot_basic_DR <- ggplot(df_did_full_DR, aes(x = event.time, y = estimate, color = period)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+  scale_color_manual(
+    values = c(
+    "Pre-Treatment" = "#855C75",
+    "Post-Treatment" = "#D9AF6B"
+#          c4a(palette = "brewer.dark2")
+              ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+
+  ) +
+  labs(
+    #title = "Dynamic ATT Over Time (Relative to Treatment, Basic DR version)",
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)",
+    
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() + 
+  theme(
+  legend.position = "bottom",
+  # legend.title = element_text(size = 10, face = "bold"),
+  # legend.text = element_text(size = 9)
+  )
+
+plot_basic_DR
+
+ggsave("images/plot_basic_dr.jpg",
+       width = 8, height = 6, dpi = 300)
+```
+
+
+
+```{r clean table with dynamic results}
+# Tidy up dynamic ATT results
+table_dynamic_ATT <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  select(event.time, estimate, std.error, point.conf.low, conf.low, point.conf.high, conf.high) %>%
+  mutate(
+    across(where(is.numeric), ~ round(.x, 3))
+  ) %>%
+  rename(
+    `Event Time` = event.time,
+    `Estimate` = estimate,
+    `Std. Error` = std.error,
+    `95% CI Lower (Simultaneous)` = conf.low,
+    `95% CI Upper (Simultaneous)` = conf.high,
+    `95% CI Lower (Pointwise)` = point.conf.low,
+    `95% CI Upper (Pointwise)` = point.conf.high
+  )
+
+# View the table
+print(table_dynamic_ATT)
+
+# Display as LaTeX table
+# knitr::kable(table_dynamic_ATT, caption = "Dynamic ATT Estimates Over Time")
+
+```
+
+
+### Models Testing Robustness for Differences in Municipality Type
+#### 2 Type Typology - clean
+```{r}
+# Step 1: Estimate ATT separately for each RegioStaR2 group
+att_results_by_group_2 <- list()
+
+for (muni_type in unique(df_CS_model_preparation$RegioStaR2)) {
+  df_subset <- df_CS_model_preparation %>% 
+    filter(RegioStaR2 == muni_type, year_of_closure < 2021)
+  
+  att_model <- att_gt(
+    yname = "employment_level",
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset,
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0
+  )
+  
+  att_dynamic <- aggte(
+    att_model, 
+    type = "dynamic",
+    #min_e = -10, 
+    max_e = 8,
+    bstrap = TRUE,
+    na.rm = TRUE)
+  
+  att_simple <- aggte(
+    att_model, 
+    type = "simple",
+    bstrap = TRUE, 
+    na.rm = TRUE)
+  
+  att_results_by_group_2[[muni_type]] <- list(
+    att_model = att_model,
+    dynamic_effect = att_dynamic,
+    simple_effect = att_simple
+  )
+}
+
+all_dynamic_results_by_group_2 <- map_df(names(att_results_by_group_2), function(muni_type) {
+  broom::tidy(att_results_by_group_2[[muni_type]]$dynamic_effect) %>%
+    mutate(
+      municipality_type = muni_type,
+      time_periods = event.time,
+      period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                      levels = c("Pre-Treatment", "Post-Treatment"))
+    )
+}) %>%
+  mutate(municipality_type = recode(municipality_type,
+    "1" = "Urban Region",
+    "2" = "Rural Region"
+  ))
+
+
+overall_treatment_effects_by_group_2 <- map_df(names(att_results_by_group_2), function(muni_type) {
+  broom::tidy(att_results_by_group_2[[muni_type]]$simple_effect) %>%
+    mutate(municipality_type = muni_type)
+}) %>%
+  rename(
+    att_estimate = estimate,
+    att_se = std.error,
+    ci_lower = conf.low,
+    ci_upper = conf.high
+  ) %>%
+  select(municipality_type, att_estimate, att_se, ci_lower, ci_upper) %>%
+  mutate(municipality_type = recode(municipality_type,
+    "1" = "Urban Region",
+    "2" = "Rural Region"
+  ))
+
+overall_treatment_effects_by_group_2
+all_dynamic_results_by_group_2
+```
+
+```{r}
+plot_dynamic_ATT_by_group_2 <- ggplot(all_dynamic_results_by_group_2, 
+                                      aes(x = time_periods, y = estimate, color = period)) +
+
+  # Main estimates and CI bars
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  # Facet by municipality type (Urban vs. Rural)
+  facet_wrap(~ municipality_type, nrow = 1) +
+
+  # Manual color scale for period
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",
+      "Post-Treatment" = "#D9AF6B"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  # Axes and labels
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_dynamic_ATT_by_group_2
+
+```
+
+```{r}
+plot_dynamic_ATT_combined <- ggplot(all_dynamic_results_by_group_2, 
+                                    aes(x = time_periods, y = estimate, 
+                                        color = period, shape = municipality_type)) +
+
+  # Points for ATT estimates with shape for group
+  geom_point(size = 2, position = position_dodge(width = 0.5)) +
+
+  # Error bars
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.3, position = position_dodge(width = 0.5)) +
+
+  # Horizontal and vertical reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  # Color = pre/post treatment
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",
+      "Post-Treatment" = "#D9AF6B"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  # Shape = municipality type (urban/rural)
+  scale_shape_manual(
+    values = c("Urban Region" = 16, "Rural Region" = 17),  # solid circle, solid triangle
+    name = "Municipality Type"
+  ) +
+  scale_linetype_manual(
+    values = c("Urban Region" = "solid", "Rural Region" = "dashed"),
+    name = "Municipality Type"
+  ) +
+  
+  # Labels and scales
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_dynamic_ATT_combined
+
+```
+
+```{r}
+all_dynamic_results_by_group_2 <- all_dynamic_results_by_group_2 %>%
+  mutate(
+    group_period = case_when(
+      municipality_type == "Urban Region" & period == "Pre-Treatment" ~ "Urban Region - Pre",
+      municipality_type == "Urban Region" & period == "Post-Treatment" ~ "Urban Region - Post",
+      municipality_type == "Rural Region" & period == "Pre-Treatment" ~ "Rural Region - Pre",
+      municipality_type == "Rural Region" & period == "Post-Treatment" ~ "Rural Region - Post"
+    )
+  )
+
+custom_colors <- c(
+  "Urban Region - Pre" = colorspace::lighten("#6A3D9A", amount = 0.25),   # lighter purple
+  "Urban Region - Post" = "#6A3D9A",  # darker purple
+  "Rural Region - Pre" = colorspace::lighten("#B15928", amount = 0.25),   # lighter brown
+  "Rural Region - Post" = "#B15928"   # darker brown
+)
+
+# Add a combined grouping variable for color mapping
+all_dynamic_results_by_group_2 <- all_dynamic_results_by_group_2 %>%
+  mutate(
+    color_group = paste(municipality_type, period, sep = " - ")
+  )
+
+plot_dynamic_ATT_combined <- ggplot(all_dynamic_results_by_group_2, 
+                                    aes(x = time_periods, y = estimate, 
+                                        color = group_period)) +
+
+  # Points for ATT estimates
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+
+  # Error bars
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = .5, position = position_dodge(width = 0.5), linewidth = 1.3) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  # Color legend = group-period combo
+  scale_color_manual(
+    values = custom_colors,
+    breaks = c("Urban Region - Post", "Rural Region - Post"),  # Only show main post-treatment labels
+    labels = c("Urban Region", "Rural Region"),
+    name = "Municipality Type\n(Lighter Shades = Pre-Treatment)"
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_dynamic_ATT_combined
+
+```
+
+
+#### 2 Type Typology
+```{r}
+# Create a list to store results
+att_results_by_group_2 <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR2)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(RegioStaR2 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_2[[type]] <- att_gt(
+    yname = "employment_level", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_2 <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_2)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_2[[type]] <- aggte(
+    att_results_by_group_2[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 8,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_2 <- map_df(names(att_dynamic_results_by_group_2), function(type) {
+  result <- att_dynamic_results_by_group_2[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_2 <- map_df(names(att_dynamic_results_by_group_2), function(type) {
+  
+  result <- att_dynamic_results_by_group_2[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR2 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_2)
+print(overall_treatment_effects_by_group_2)
+
+# plot dynamic ATT
+ggplot(all_dynamic_results_by_group_2, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time, by Municipality Type",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type",
+    fill = "Municipality Type"
+  )
+```
+
+#### 4 Type Typology 
+```{r}
+# Create a list to store results
+att_results_by_group_4 <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR4from5)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(RegioStaR4from5 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_4[[type]] <- att_gt(
+    yname = "employment_level", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+#    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_4 <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_4)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_4[[type]] <- aggte(
+    att_results_by_group_4[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 4,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_4 <- map_df(names(att_dynamic_results_by_group_4), function(type) {
+  result <- att_dynamic_results_by_group_4[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_4 <- map_df(names(att_dynamic_results_by_group_4), function(type) {
+  
+  result <- att_dynamic_results_by_group_4[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR4from5 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_4)
+print(overall_treatment_effects_by_group_4)
+
+# plot dynamic ATT results
+ggplot(all_dynamic_results_by_group_4, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time Per Municipality Type",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type",
+    fill = "Municipality Type"
+  )
+
+```
+
+#### 4 Type Typology (Leave one out)
+```{r}
+# Create a list to store results
+att_results_by_group_4_loo <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR4from5)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(!RegioStaR4from5 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_4_loo[[type]] <- att_gt(
+    yname = "employment_level", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_4_loo <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_4_loo)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_4_loo[[type]] <- aggte(
+    att_results_by_group_4_loo[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 8,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Now we have a list where each municipality type has its own dynamic effect results
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_4_loo <- map_df(names(att_dynamic_results_by_group_4_loo), function(type) {
+  result <- att_dynamic_results_by_group_4_loo[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_4_loo <- map_df(names(att_dynamic_results_by_group_4_loo), function(type) {
+  
+  result <- att_dynamic_results_by_group_4_loo[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR4from5 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_4_loo)
+print(overall_treatment_effects_by_group_4_loo)
+
+# plot dynamic ATT
+ggplot(all_dynamic_results_by_group_4_loo, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time, One Municipality Type Left Out",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type Left Out",
+    fill = "Municipality Type Left Out"
+  )
+
+```
+
+### Basic Model OR
+```{r}
+# Step 1: Estimate ATT using att_gt with OR method
+CS_baseline_OR_results <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0,                        
+  est_method = "OR"                         # Use outcome regression
+)
+
+# Step 2: Compute dynamic ATT
+CS_baseline_OR_dynamic_effect <- aggte(
+  CS_baseline_OR_results, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_baseline_OR_simple_effect <- aggte(
+  CS_baseline_OR_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_baseline_OR_dynamic_data <- broom::tidy(CS_baseline_OR_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store for future use
+CS_baseline_OR_results_combined <- list(
+  att_model = CS_baseline_OR_results,
+  dynamic_effect = CS_baseline_OR_dynamic_effect,
+  simple_effect = CS_baseline_OR_simple_effect
+)
+
+CS_baseline_OR_simple_effect
+CS_baseline_OR_dynamic_data
+```
+
+```{r}
+# Step 1: Create a pre/post treatment indicator for OR model
+df_did_full_OR <- broom::tidy(CS_baseline_OR_dynamic_effect) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 2: Create the plot
+plot_basic_OR <- ggplot(df_did_full_OR, aes(x = event.time, y = estimate, color = period)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",
+      "Post-Treatment" = "#D9AF6B"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() + 
+  theme(
+    legend.position = "bottom"
+  )
+
+# Show the plot
+plot_basic_OR
+
+# Save the plot
+ggsave("images/plot_basic_or.jpg",
+       plot = plot_basic_OR,
+       width = 8, height = 6, dpi = 300)
+
+```
+
+
+### Balancing: Matching before Weighting, then Callaway SantAnna
+```{r}
+# Ensure each unit appears only once and remove NAs
+df_unique_units <- df_CS_model_preparation %>%
+  group_by(ARS) %>% 
+  filter(
+    all(!is.na(employment_level)),  # Ensure complete data for employment_level
+#    all(!is.na(employment_level_female)),  # Ensure complete data for female employment
+#    all(!is.na(employment_level_55_64))  # Ensure complete data for older employment group
+  ) %>%
+  ungroup() %>%
+  filter(!Year >= 2021) %>%
+  filter(!is.na(RegioStaR6from7)) %>%
+#  filter(!RegioStaR4from5 == "51/52") %>%
+#  filter(!spillover_unit == TRUE) %>%
+  filter(staff_doctors_nurses_numeric >= 10| treatment_status_spillover == "control") %>%
+  distinct(ARS, .keep_all = TRUE) %>%
+  mutate(
+    year_of_closure = as.numeric(year_of_closure)
+  )
+
+# Number of runs
+n_runs <- 100
+matching_ratio <- 6  # Number of controls per treated unit
+
+# Store matched datasets
+matched_datasets <- vector("list", n_runs)
+
+for (i in 1:n_runs) {
+  
+  set.seed(i * 100)  # Set a different seed for each run
+
+  # Create an empty list to store matched subsets per RegioStaR4from5
+  matched_subsamples <- list()
+
+  # Loop through each Demografietyp
+  for (demo_type in unique(df_unique_units$RegioStaR6from7)) {
+    
+    # Subset data for this demographic type
+    df_subset <- df_unique_units %>%
+      filter(RegioStaR6from7 == demo_type)
+    
+    # Count treated units
+    treated_units <- df_subset %>% filter(treatment_status_spillover == "direct_treated")
+    control_units <- df_subset %>% filter(treatment_status_spillover == "control")
+    
+    num_treated <- nrow(treated_units)
+    num_controls_needed <- num_treated * matching_ratio
+
+    # Ensure there are enough controls to sample
+    if (num_controls_needed > nrow(control_units)) {
+      sampled_controls <- control_units  # Take all available controls if not enough
+    } else {
+      sampled_controls <- control_units %>%
+        slice_sample(n = num_controls_needed, replace = FALSE)  # Random selection
+    }
+    
+    # Combine treated and sampled control units
+    matched_subset <- bind_rows(treated_units, sampled_controls)
+    matched_subsamples[[demo_type]] <- matched_subset
+  }
+  
+  # Combine all demographic-type samples into a single matched dataset
+  df_matched <- bind_rows(matched_subsamples)
+
+  # Compute treated & control counts per demographic type
+  df_summary <- df_matched %>%
+    group_by(RegioStaR4from5, treatment_status_spillover) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    tidyr::pivot_wider(names_from = treatment_status_spillover, values_from = count, values_fill = 0) %>%
+   rename(Control = `control`, Treated = `direct_treated`) %>%
+   mutate(Total = Control + Treated,
+          Treated_Share = Treated / Total)
+  
+  # Store matched dataset in the list
+  matched_datasets[[i]] <- list(
+    matched_data = df_matched,
+    summary_stats = df_summary
+  )
+
+  print(paste("Randomized Matching Run", i, "completed."))
+}
+
+# Check if the datasets are now different
+identical(matched_datasets[[5]], matched_datasets[[1]])  # Should return FALSE now
+
+```
+
+```{r}
+# List to store fully processed datasets
+final_datasets <- vector("list", length(matched_datasets))
+
+for (i in seq_along(matched_datasets)) {
+  
+  df_weighted <- matched_datasets[[i]]$matched_data  # Extract only the matched dataframe
+  
+  # Merge with full dataset and handle missing values
+  df_merged <-df_CS_model_preparation %>%
+    inner_join(
+      df_weighted %>%
+        dplyr::select(ARS, Year),  # Keep only necessary columns
+      by = c("ARS")  # Merge on unit ID & year
+    ) %>%
+    ungroup()
+
+  # Store the final dataset
+  final_datasets[[i]] <- df_merged
+  
+  print(paste("Final dataset preparation completed for run", i))
+}
+
+
+```
+
+```{r}
+# List to store ATT and dynamic ATT results
+att_results_list <- vector("list", length(final_datasets))
+
+# Loop over all datasets and estimate ATT + dynamic ATT
+for (i in seq_along(final_datasets)) {
+  
+  df_weighted <- final_datasets[[i]]  # Extract one dataset
+
+  # Ensure 'year_of_closure' is numeric
+  df_weighted <- df_weighted %>%
+    mutate(year_of_closure = as.numeric(year_of_closure))  # Convert if necessary
+    
+  # Run att_gt model
+  att_results <- att_gt(
+    yname = "employment_level",
+    #employment_level_female
+    tname = "Year.x",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_weighted,
+#    weightsname = "gbm_weights",  
+    control_group = "nevertreated",
+    xformla = ~ RegioStaR4from5,
+    anticipation = 0, bstrap = FALSE,   cband = FALSE
+#    bstrap = FALSE
+#    biters = 5000  # Bootstrap iterations
+  )
+
+  # Compute simple ATT (overall average ATT)
+  att_simple_effect <- aggte(
+  att_results,
+  type = "simple", bstrap = FALSE,
+#  bstrap = TRUE,
+  na.rm = TRUE
+  )
+  
+  # Compute dynamic ATT over time
+  att_dynamic_effect <- aggte(
+    att_results, 
+    type = "dynamic",
+#    min_e = -6,
+    max_e = 8,  
+    na.rm = TRUE, bstrap = FALSE
+#    bstrap = TRUE  
+  )
+
+  # Store both static and dynamic ATT results
+  att_results_list[[i]] <- list(
+    att_model = att_results,
+    simple_effect = att_simple_effect,
+    dynamic_effect = att_dynamic_effect
+  )
+
+  print(paste("ATT model, simple ATT & dynamic ATT completed for dataset", i))
+}
+
+```
+
+```{r}
+# Step 1: Extract tidy dynamic ATT results from each aggte object
+all_dynamic_results <- map_df(seq_along(att_results_list), function(i) {
+  broom::tidy(att_results_list[[i]]$dynamic_effect) %>%
+    mutate(run = i)
+})
+
+all_dynamic_results <- all_dynamic_results %>%
+  rename(time_periods = event.time) %>%
+  mutate(
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 2: Compute average estimates and use correct (simultaneous) confidence intervals
+summary_dynamic_results <- all_dynamic_results %>%
+  group_by(time_periods) %>%
+  summarise(
+    mean_estimate = mean(estimate, na.rm = TRUE),
+    mean_ci_lower = mean(conf.low, na.rm = TRUE),
+    mean_ci_upper = mean(conf.high, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Step 3: Add a period column (pre vs post)
+summary_dynamic_results <- summary_dynamic_results %>%
+  mutate(
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+```
+
+```{r}
+summary_dynamic_results
+```
+
+
+```{r polished plot}
+plot_dynamic_ATT_prematched <- ggplot(summary_dynamic_results, aes(x = time_periods, y = mean_estimate, color = period)) +
+  # Add faded lines for individual runs
+  geom_line(data = all_dynamic_results,
+            aes(x = time_periods, y = estimate, group = run), 
+            color = "gray50", alpha = 0.4, linewidth = .75) +
+
+  # Add mean estimates and error bars
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = mean_ci_lower, ymax = mean_ci_upper), width = 0.3) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  # Color scheme and labels
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",
+      "Post-Treatment" = "#D9AF6B"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)",
+    caption = "Gray lines represent individual model estimates across iterations"
+  ) +
+
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+plot_dynamic_ATT_prematched
+```
+
+```{r polished histogram}
+# Step 1: Compute overall ATT for each model using aggte(..., type = "simple")
+att_overall_results <- map_df(att_results_list, function(x) {
+  broom::tidy(x$simple_effect)
+}) %>%
+  rename(
+    att_estimate = estimate,
+    att_se = std.error
+  )  %>%
+  mutate(
+    ci_lower = att_estimate - 1.96 * att_se,
+    ci_upper = att_estimate + 1.96 * att_se
+  ) %>%
+  filter(!is.na(att_estimate))
+
+
+# Step 2: Calculate summary statistics and pivot for desired layout
+summary_table <- tibble(
+  Statistic = c("Min", "Q1", "Median", "Mean", "Q3", "Max"),
+  `ATT Estimate` = c(
+    min(att_overall_results$att_estimate, na.rm = TRUE),
+    quantile(att_overall_results$att_estimate, 0.25, na.rm = TRUE),
+    median(att_overall_results$att_estimate, na.rm = TRUE),
+    mean(att_overall_results$att_estimate, na.rm = TRUE),
+    quantile(att_overall_results$att_estimate, 0.75, na.rm = TRUE),
+    max(att_overall_results$att_estimate, na.rm = TRUE)
+  ),
+  `Standard Error` = c(
+    min(att_overall_results$att_se, na.rm = TRUE),
+    quantile(att_overall_results$att_se, 0.25, na.rm = TRUE),
+    median(att_overall_results$att_se, na.rm = TRUE),
+    mean(att_overall_results$att_se, na.rm = TRUE),
+    quantile(att_overall_results$att_se, 0.75, na.rm = TRUE),
+    max(att_overall_results$att_se, na.rm = TRUE)
+  ),
+  `CI Lower` = c(
+    min(att_overall_results$ci_lower, na.rm = TRUE),
+    quantile(att_overall_results$ci_lower, 0.25, na.rm = TRUE),
+    median(att_overall_results$ci_lower, na.rm = TRUE),
+    mean(att_overall_results$ci_lower, na.rm = TRUE),
+    quantile(att_overall_results$ci_lower, 0.75, na.rm = TRUE),
+    max(att_overall_results$ci_lower, na.rm = TRUE)
+  ),
+  `CI Upper` = c(
+    min(att_overall_results$ci_upper, na.rm = TRUE),
+    quantile(att_overall_results$ci_upper, 0.25, na.rm = TRUE),
+    median(att_overall_results$ci_upper, na.rm = TRUE),
+    mean(att_overall_results$ci_upper, na.rm = TRUE),
+    quantile(att_overall_results$ci_upper, 0.75, na.rm = TRUE),
+    max(att_overall_results$ci_upper, na.rm = TRUE)
+  )
+) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+# Print as a tidy table
+print(table_att_summary)
+
+table_att_summary_brief <- table_att_summary %>%
+  select(
+    `att Mean`,
+    `att se Mean`,
+    `ci_lower Mean`,
+    `ci_upper Mean`
+  )
+table_att_summary_brief
+
+# Step 3: Plot
+plot_histogram_overall_ATT_prematched <- ggplot(att_overall_results, aes(x = att_estimate)) +
+  geom_histogram(binwidth = 0.02, fill = "#D9AF6B", alpha = 0.7, color = "black") +
+  geom_vline(
+    xintercept = mean(att_overall_results$att_estimate, na.rm = TRUE),
+    linetype = "dashed", color = "#855C75", linewidth = 1.5
+  ) +
+  annotate(
+    "text",
+    x = mean(att_overall_results$att_estimate, na.rm = TRUE),
+    y = Inf, vjust = 5, hjust = 1.3,
+    label = "Mean ATT", color = "#855C75", fontface = "italic", size = 5
+  ) +
+  labs(
+    title = NULL,
+    x = "Average Treatment Effect (ATT)",
+    y = "Number of Model Runs"
+  ) +
+  scale_x_continuous(
+    labels = scales::label_percent(scale = 1),
+    breaks = scales::pretty_breaks(n = 6)
+    ) +
+  scale_y_continuous(
+    breaks = seq(0, 20, by = 5),
+    limits = c(0, 20),
+    minor_breaks = seq(0,20, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+  )
+# Print
+plot_histogram_overall_ATT_prematched
+
+
+ggsave("images/plot_overall_ATT_prematched.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+```{r}
+
+
+# Step 1: Calculate summary statistics and pivot for desired layout
+summary_table <- tibble(
+  Statistic = c("Min", "Q1", "Median", "Mean", "Q3", "Max"),
+  `ATT Estimate` = c(
+    min(att_overall_results$att_estimate, na.rm = TRUE),
+    quantile(att_overall_results$att_estimate, 0.25, na.rm = TRUE),
+    median(att_overall_results$att_estimate, na.rm = TRUE),
+    mean(att_overall_results$att_estimate, na.rm = TRUE),
+    quantile(att_overall_results$att_estimate, 0.75, na.rm = TRUE),
+    max(att_overall_results$att_estimate, na.rm = TRUE)
+  ),
+  `Standard Error` = c(
+    min(att_overall_results$att_se, na.rm = TRUE),
+    quantile(att_overall_results$att_se, 0.25, na.rm = TRUE),
+    median(att_overall_results$att_se, na.rm = TRUE),
+    mean(att_overall_results$att_se, na.rm = TRUE),
+    quantile(att_overall_results$att_se, 0.75, na.rm = TRUE),
+    max(att_overall_results$att_se, na.rm = TRUE)
+  ),
+  `CI Lower` = c(
+    min(att_overall_results$ci_lower, na.rm = TRUE),
+    quantile(att_overall_results$ci_lower, 0.25, na.rm = TRUE),
+    median(att_overall_results$ci_lower, na.rm = TRUE),
+    mean(att_overall_results$ci_lower, na.rm = TRUE),
+    quantile(att_overall_results$ci_lower, 0.75, na.rm = TRUE),
+    max(att_overall_results$ci_lower, na.rm = TRUE)
+  ),
+  `CI Upper` = c(
+    min(att_overall_results$ci_upper, na.rm = TRUE),
+    quantile(att_overall_results$ci_upper, 0.25, na.rm = TRUE),
+    median(att_overall_results$ci_upper, na.rm = TRUE),
+    mean(att_overall_results$ci_upper, na.rm = TRUE),
+    quantile(att_overall_results$ci_upper, 0.75, na.rm = TRUE),
+    max(att_overall_results$ci_upper, na.rm = TRUE)
+  )
+) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 2)))
+
+# Step 2: Output as LaTeX table
+cat(kable(summary_table, format = "latex", booktabs = TRUE, caption = "Summary of ATT Estimates and Confidence Intervals"))
+
+
+```
+
+
+## Combine Three Models into Facet Plot
+```{r}
+# Step 1: Estimate ATT using att_gt
+CS_baseline_DR_results_no_bootstrap <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0,
+  bstrap = FALSE
+)
+
+# Step 2: Compute dynamic ATT (no bootstrap)
+CS_baseline_DR_dynamic_effect_no_bootstrap <- aggte(
+  CS_baseline_DR_results_no_bootstrap, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = FALSE,
+  cband = FALSE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT (no bootstrap)
+CS_baseline_DR_simple_effect_no_bootstrap <- aggte(
+  CS_baseline_DR_results_no_bootstrap,
+  type = "simple",
+  bstrap = FALSE,
+  cband = FALSE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results and manually construct symmetric CIs
+CS_baseline_DR_dynamic_data_no_bootstrap <- broom::tidy(CS_baseline_DR_dynamic_effect_no_bootstrap) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    ci_lower = estimate - 1.96 * std.error,
+    ci_upper = estimate + 1.96 * std.error
+  )
+
+# Step 5: Store for comparison
+CS_baseline_DR_results_combined_no_bootstrap <- list(
+  att_model = CS_baseline_DR_results_no_bootstrap,
+  dynamic_effect = CS_baseline_DR_dynamic_effect_no_bootstrap,
+  simple_effect = CS_baseline_DR_simple_effect_no_bootstrap
+)
+
+# Optional: display results
+CS_baseline_DR_simple_effect_no_bootstrap
+CS_baseline_DR_dynamic_data_no_bootstrap
+
+```
+
+```{r}
+# Step 1: Estimate ATT using att_gt with OR method (no bootstrap)
+CS_baseline_OR_results_no_bootstrap <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0,                        
+  est_method = "OR",
+  bstrap = FALSE
+)
+
+# Step 2: Compute dynamic ATT (no bootstrap)
+CS_baseline_OR_dynamic_effect_no_bootstrap <- aggte(
+  CS_baseline_OR_results_no_bootstrap, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = FALSE,                           
+  cband = FALSE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT (no bootstrap)
+CS_baseline_OR_simple_effect_no_bootstrap <- aggte(
+  CS_baseline_OR_results_no_bootstrap,
+  type = "simple",
+  bstrap = FALSE,                           
+  cband = FALSE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results and construct symmetric CIs
+CS_baseline_OR_dynamic_data_no_bootstrap <- broom::tidy(CS_baseline_OR_dynamic_effect_no_bootstrap) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    ci_lower = estimate - 1.96 * std.error,
+    ci_upper = estimate + 1.96 * std.error
+  )
+
+# Step 5: Store results for later comparison
+CS_baseline_OR_results_combined_no_bootstrap <- list(
+  att_model = CS_baseline_OR_results_no_bootstrap,
+  dynamic_effect = CS_baseline_OR_dynamic_effect_no_bootstrap,
+  simple_effect = CS_baseline_OR_simple_effect_no_bootstrap
+)
+
+# Optional: print result summaries
+CS_baseline_OR_simple_effect_no_bootstrap
+CS_baseline_OR_dynamic_data_no_bootstrap
+```
+
+
+```{r merge data from different models}
+# --- Default DR Model ---
+df_did_full_DR <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  rename(
+    time_periods = event.time,
+  ) %>%
+  mutate(
+    ci_lower = estimate - 1.96 * std.error,
+    ci_upper = estimate + 1.96 * std.error,
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = "Default DR Model"
+  ) %>%
+  select(time_periods, estimate, ci_lower, ci_upper, period, model)
+
+# --- Basic OR Model ---
+df_did_full_OR <- broom::tidy(CS_baseline_OR_dynamic_effect) %>%
+  rename(
+    time_periods = event.time,
+  ) %>%
+  mutate(
+    ci_lower = estimate - 1.96 * std.error,
+    ci_upper = estimate + 1.96 * std.error,
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = "Basic OR Model"
+  ) %>%
+  select(time_periods, estimate, ci_lower, ci_upper, period, model)
+
+# --- Pre-Matched DR Model (averaged results from simulation) ---
+summary_dynamic_results_labeled <- summary_dynamic_results %>%
+  rename(
+    estimate = mean_estimate,
+    ci_lower = mean_ci_lower,
+    ci_upper = mean_ci_upper
+  ) %>%
+  mutate(
+    model = "Pre-Matched DR Model",
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  ) %>%
+  select(time_periods, estimate, ci_lower, ci_upper, period, model)
+
+# --- Combine All Models for Plotting ---
+df_combined_models <- bind_rows(
+  df_did_full_DR,
+  df_did_full_OR,
+  summary_dynamic_results_labeled
+)
+
+# --- Optional: Label raw pre-matched runs for background lines (gray traces) ---
+all_dynamic_results_labeled <- all_dynamic_results %>%
+  mutate(
+    model = "Pre-Matched DR Model",
+    period = factor(
+      ifelse(time_periods < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+```
+
+```{r polished facet}
+plot_combined_models <- ggplot() +
+  # Gray lines for Pre-Matched individual runs
+  geom_line(
+    data = all_dynamic_results_labeled,
+    aes(x = time_periods, y = estimate, group = run),
+    color = "gray80", alpha = 0.3, linewidth = 0.75
+  ) +
+
+  # Main points and intervals for all models
+  geom_point(
+    data = df_combined_models,
+    aes(x = time_periods, y = estimate, color = period),
+    size = 3
+  ) +
+  geom_errorbar(
+    data = df_combined_models,
+    aes(x = time_periods, ymin = ci_lower, ymax = ci_upper, color = period),
+    width = 0.3, linewidth = 1.2
+  ) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  # Color & labels
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)",
+    caption = "Gray lines represent individual model estimates across iterations"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  facet_wrap(~ model, nrow = 1, scales = "fixed") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold"),
+    plot.caption = element_text(size = 12)
+  )
+
+plot_combined_models
+
+# Save it
+ggsave("images/plot_combined_models_facet.png", plot_combined_models,
+       width = 12, height = 5, dpi = 300)
+
+```
+
+```{r}
+df_combined_models
+```
+
+
+## Estimation for Female Employment
+
+### Basic Model with Default Setting (DR) (Female)
+```{r run model and estimation}
+# Step 1: Estimate ATT using att_gt
+CS_baseline_DR_results_female <- att_gt(
+  yname = "employment_level_female",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0                         
+)
+
+# Step 2: Compute dynamic ATT
+CS_baseline_DR_dynamic_effect_female <- aggte(
+  CS_baseline_DR_results_female, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_baseline_DR_simple_effect_female <- aggte(
+  CS_baseline_DR_results_female,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_baseline_DR_dynamic_data_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store for future use
+CS_baseline_DR_results_combined_female <- list(
+  att_model = CS_baseline_DR_results_female,
+  dynamic_effect = CS_baseline_DR_dynamic_effect_female,
+  simple_effect = CS_baseline_DR_simple_effect_female
+)
+
+CS_baseline_DR_simple_effect_female
+CS_baseline_DR_dynamic_data_female
+```
+
+```{r}
+# Step 1: Create a pre/post treatment indicator
+df_did_full_DR_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 2: Create the plot
+plot_basic_DR_female <- ggplot(df_did_full_DR_female, aes(x = event.time, y = estimate, color = period)) +
+  geom_point(size = 2) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+  scale_color_manual(
+    values = c(
+    "Pre-Treatment" = "#855C75",
+    "Post-Treatment" = "#D9AF6B"
+#          c4a(palette = "brewer.dark2")
+              ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+
+  ) +
+  labs(
+    #title = "Dynamic ATT Over Time (Relative to Treatment, Basic DR version Female Employment)",
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)",
+    
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() + 
+  theme(
+  legend.position = "bottom",
+  # legend.title = element_text(size = 10, face = "bold"),
+  # legend.text = element_text(size = 9)
+  )
+
+plot_basic_DR_female
+
+ggsave("images/plot_basic_dr_female.jpg",
+       width = 8, height = 6, dpi = 300)
+```
+
+```{r clean table with dynamic results}
+# Tidy up dynamic ATT results
+table_dynamic_ATT_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  select(event.time, estimate, std.error, point.conf.low, conf.low, point.conf.high, conf.high) %>%
+  mutate(
+    across(where(is.numeric), ~ round(.x, 3))
+  ) %>%
+  rename(
+    `Event Time` = event.time,
+    `Estimate` = estimate,
+    `Std. Error` = std.error,
+    `95% CI Lower (Simultaneous)` = conf.low,
+    `95% CI Upper (Simultaneous)` = conf.high,
+    `95% CI Lower (Pointwise)` = point.conf.low,
+    `95% CI Upper (Pointwise)` = point.conf.high
+  )
+
+# View the table
+print(table_dynamic_ATT_female)
+
+# Display as LaTeX table
+# knitr::kable(table_dynamic_ATT, caption = "Dynamic ATT Estimates Over Time")
+
+```
+
+```{r}
+# Tidy both datasets and add identifiers
+df_did_full_DR_all <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(
+    gender_group = "Overall Employment",
+    time_periods = event.time,
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment"))
+  )
+
+df_did_full_DR_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  mutate(
+    gender_group = "Female Employment",
+    time_periods = event.time,
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment"))
+  )
+
+# Combine
+df_combined_gender <- bind_rows(df_did_full_DR_all, df_did_full_DR_female)
+
+```
+
+```{r}
+df_combined_gender <- df_combined_gender %>%
+  mutate(
+    group_period = paste(gender_group, period, sep = " - ")
+  )
+```
+
+```{r}
+custom_gender_colors <- c(
+  "Overall Employment - Pre-Treatment"    = colorspace::lighten("#1B9E77", amount = 0.3),  # lighter teal
+  "Overall Employment - Post-Treatment"   = "#1B9E77",                                     # dark teal
+  "Female Employment - Pre-Treatment" = colorspace::lighten("#D95F02", amount = 0.3),  # lighter orange
+  "Female Employment - Post-Treatment"= "#D95F02"                                      # dark orange
+)
+
+```
+
+```{r}
+plot_dynamic_ATT_gender <- ggplot(df_combined_gender, 
+                                  aes(x = time_periods, y = estimate, color = group_period)) +
+
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.4, position = position_dodge(width = 0.5), linewidth = 1.2) +
+
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  scale_color_manual(
+    values = custom_gender_colors,
+    breaks = c("Overall Employment - Post-Treatment", "Female Employment - Post-Treatment"),
+    labels = c("Overall Employment", "Female Employment"),
+    name = "Group\n(Lighter Shades = Pre-Treatment)"
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_dynamic_ATT_gender
+
+```
+
+
+### Old version, works
+```{r}
+CS_baseline_results_female <- att_gt(
+  yname = "employment_level_female",        # Outcome variable
+  tname = "Year",                          # Time variable
+  idname = "ARS",                 # Unit identifier
+  gname = "year_of_closure",               # Treatment timing
+  data = df_CS_model_preparation %>% filter(year_of_closure < 2021),
+#%>% filter(RegioStaR4from5 == "51/52" | RegioStaR4from5 == "53" | RegioStaR4from5 == "54"  | RegioStaR4from5 == "55"),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",          # Comparison group
+  anticipation = 0  # Allow 2-year anticipation effect
+)
+
+# Summarize and analyze the results
+# summary(CS_baseline_results)
+
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_dynamic_effect_female <- aggte(
+  CS_baseline_results_female, 
+  type = "dynamic",
+#  min_e = -6,       # Start at year 0 (treatment year)
+  max_e = 8, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_dynamic_effect_female)
+
+# dynamic effect into dataframe 
+CS_baseline_dynamic_data_female <- data.frame(
+  time_periods = CS_baseline_dynamic_effect_female$egt,       # Relative time periods
+  estimate = CS_baseline_dynamic_effect_female$att.egt,      # ATT estimates
+  ci_lower = CS_baseline_dynamic_effect_female$att.egt - 1.96 * CS_baseline_dynamic_effect_female$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_baseline_dynamic_effect_female$att.egt + 1.96 * CS_baseline_dynamic_effect_female$se.egt   # Upper bound of 95% CI
+)
+
+# Plot the dynamic ATT over time
+ggplot(CS_baseline_dynamic_data_female, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, basic DR version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+ggdid(CS_baseline_dynamic_effect_female)
+```
+
+
+### Models Testing Robustness for Differences in Municipality Type (Female)
+#### 2 Type Typology
+```{r}
+# Create a list to store results
+att_results_by_group_2_female <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR2)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(RegioStaR2 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_2_female[[type]] <- att_gt(
+    yname = "employment_level_female", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_2_female <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_2_female)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_2_female[[type]] <- aggte(
+    att_results_by_group_2_female[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 8,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_2_female <- map_df(names(att_dynamic_results_by_group_2_female), function(type) {
+  result <- att_dynamic_results_by_group_2_female[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_2_female <- map_df(names(att_dynamic_results_by_group_2_female), function(type) {
+  
+  result <- att_dynamic_results_by_group_2_female[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR2 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_2_female)
+print(overall_treatment_effects_by_group_2_female)
+
+# plot dynamic ATT
+ggplot(all_dynamic_results_by_group_2_female, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time, by Municipality Type",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type",
+    fill = "Municipality Type"
+  )
+```
+
+#### 4 Type Typology 
+```{r}
+# Create a list to store results
+att_results_by_group_4_female <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR4from5)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(RegioStaR4from5 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_4_female[[type]] <- att_gt(
+    yname = "employment_level_female", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+#    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_4_female <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_4_female)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_4_female[[type]] <- aggte(
+    att_results_by_group_4_female[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 4,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_4_female <- map_df(names(att_dynamic_results_by_group_4_female), function(type) {
+  result <- att_dynamic_results_by_group_4_female[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_4_female <- map_df(names(att_dynamic_results_by_group_4_female), function(type) {
+  
+  result <- att_dynamic_results_by_group_4_female[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR4from5 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_4_female)
+print(overall_treatment_effects_by_group_4_female)
+
+# plot dynamic ATT results
+ggplot(all_dynamic_results_by_group_4_female, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time Per Municipality Type",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type",
+    fill = "Municipality Type"
+  )
+
+```
+
+#### 4 Type Typology (Leave one out)
+```{r}
+# Create a list to store results
+att_results_by_group_4_loo_female <- list()
+
+# Loop over each municipality type
+for (type in unique(df_CS_model_preparation$RegioStaR4from5)) {
+  
+  # Filter data for this specific group
+  df_subset <- df_CS_model_preparation %>% filter(!RegioStaR4from5 == type)
+  
+  # Run att_gt() for the subset
+  att_results_by_group_4_loo_female[[type]] <- att_gt(
+    yname = "employment_level_female", 
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset %>% filter(year_of_closure < 2021),
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0  # Modify as needed
+  )
+}
+
+# Create a new list to store dynamic effect results
+att_dynamic_results_by_group_4_loo_female <- list()
+
+# Loop over each municipality type and apply aggte() for dynamic effects
+for (type in names(att_results_by_group_4_loo_female)) {
+  
+  # Apply aggte() to extract dynamic effects for each subgroup
+  att_dynamic_results_by_group_4_loo_female[[type]] <- aggte(
+    att_results_by_group_4_loo_female[[type]], 
+    type = "dynamic",
+#   min_e = -6,       # Start at year 0 (treatment year)
+    max_e = 8,
+    na.rm = TRUE,
+    bstrap = TRUE  # Enable bootstrapped standard errors
+  )
+}
+
+# Now we have a list where each municipality type has its own dynamic effect results
+
+# Extract dynamic ATT results from all groups
+all_dynamic_results_by_group_4_loo_female <- map_df(names(att_dynamic_results_by_group_4_loo_female), function(type) {
+  result <- att_dynamic_results_by_group_4_loo_female[[type]]
+  
+  tibble(
+    time_periods = result$egt,       
+    estimate = result$att.egt,      
+    ci_lower = result$att.egt - 1.96 * result$se.egt,  
+    ci_upper = result$att.egt + 1.96 * result$se.egt,   
+    group = type
+  )
+})
+
+# Extract the weighted overall treatment effect for each group
+overall_treatment_effects_by_group_4_loo_female <- map_df(names(att_dynamic_results_by_group_4_loo_female), function(type) {
+  
+  result <- att_dynamic_results_by_group_4_loo_female[[type]]  # Extract results
+  
+  tibble(
+    RegioStaR4from5 = type,  # Municipality Type
+    overall_att = result$overall.att,  # Weighted ATT
+    overall_se = result$overall.se,    # Standard error
+    ci_lower = result$overall.att - 1.96 * result$overall.se,  # 95% CI Lower Bound
+    ci_upper = result$overall.att + 1.96 * result$overall.se   # 95% CI Upper Bound
+  )
+})
+
+
+# Display the extracted results
+print(all_dynamic_results_by_group_4_loo_female)
+print(overall_treatment_effects_by_group_4_loo_female)
+
+# plot dynamic ATT
+ggplot(all_dynamic_results_by_group_4_loo_female, aes(x = time_periods, y = estimate, color = group, group = group)) +
+  geom_line(linewidth = 1.2) +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper, fill = group), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  theme_minimal() +
+  labs(
+    title = "Dynamic ATT Over Time, One Municipality Type Left Out",
+    x = "Years Since Treatment",
+    y = "ATT Estimate",
+    color = "Municipality Type Left Out",
+    fill = "Municipality Type Left Out"
+  )
+
+```
+
+### Basic Model OR (Female)
+```{r}
+CS_baseline_results_OR_female <- att_gt(
+  yname = "employment_level_female",        # Outcome variable
+  tname = "Year",                          # Time variable
+  idname = "ARS",                 # Unit identifier
+  gname = "year_of_closure",               # Treatment timing
+  data = df_CS_model_preparation %>% filter(year_of_closure < 2021),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",          # Comparison group
+  anticipation = 0,  # Allow X-year anticipation effect
+  est_method = "OR"
+)
+
+# Summarize and analyze the results
+summary(CS_baseline_results_OR_female)
+
+# Compute the dynamic ATT (effects by relative time to treatment)
+CS_baseline_dynamic_effect_OR_female <- aggte(
+  CS_baseline_results_OR_female, 
+  type = "dynamic",
+#  min_e = -6,       # Start at year 0 (treatment year)
+  max_e = 8, 
+  na.rm = TRUE,
+  bstrap=TRUE)
+
+# Summarize the dynamic effects
+summary(CS_baseline_dynamic_effect_OR_female)
+
+# create dataframe from dynamic effects
+CS_baseline_dynamic_data_OR_female <- data.frame(
+  time_periods = CS_baseline_dynamic_effect_OR_female$egt,       # Relative time periods
+  estimate = CS_baseline_dynamic_effect_OR_female$att.egt,      # ATT estimates
+  ci_lower = CS_baseline_dynamic_effect_OR_female$att.egt - 1.96 * CS_baseline_dynamic_effect_OR_female$se.egt,  # Lower bound of 95% CI
+  ci_upper = CS_baseline_dynamic_effect_OR_female$att.egt + 1.96 * CS_baseline_dynamic_effect_OR_female$se.egt   # Upper bound of 95% CI
+)
+
+
+# Plot the dynamic ATT over time
+ggplot(CS_baseline_dynamic_data_OR_female, aes(x = time_periods, y = estimate)) +
+  geom_point() +
+  geom_line() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.2) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+  labs(
+    title = "Dynamic ATT Over Time (Relative to Treatment, Basic OR version)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal()
+
+ggdid(CS_baseline_dynamic_effect_OR_female)
+```
+
+
+### Balancing: Matching before Weighting, then Callaway SantAnna (Female)
+
+
+```{r}
+# List to store ATT and dynamic ATT results
+att_results_list_female <- vector("list", length(final_datasets))
+
+# Loop over all datasets and estimate ATT + dynamic ATT
+for (i in seq_along(final_datasets)) {
+  
+  df_weighted <- final_datasets[[i]]  # Extract one dataset
+
+  # Ensure 'year_of_closure' is numeric
+  df_weighted <- df_weighted %>%
+    mutate(year_of_closure = as.numeric(year_of_closure))  # Convert if necessary
+    
+  # Run att_gt model
+  att_results <- att_gt(
+    yname = "employment_level_female",
+    tname = "Year.x",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_weighted,
+#    weightsname = "gbm_weights",  
+    control_group = "nevertreated",
+    xformla = ~ RegioStaR4from5,
+    anticipation = 0
+#    bstrap = TRUE,
+#    biters = 5000  # Bootstrap iterations
+  )
+
+  # Compute dynamic ATT over time
+  att_dynamic_effect <- aggte(
+    att_results, 
+    type = "dynamic",
+#    min_e = -6,
+    max_e = 8,  
+    na.rm = TRUE,
+    bstrap = TRUE  
+  )
+
+  # Store both static and dynamic ATT results
+  att_results_list_female[[i]] <- list(
+    att_model = att_results,
+    dynamic_effect = att_dynamic_effect
+  )
+
+  print(paste("Female ATT model & dynamic ATT completed for dataset", i))
+}
+
+```
+
+
+```{r}
+# Extract dynamic ATT results from all models
+all_dynamic_results_female <- map_df(seq_along(att_results_list_female), function(i) {
+  tibble(
+    time_periods = att_results_list_female[[i]]$dynamic_effect$egt,       
+    estimate = att_results_list_female[[i]]$dynamic_effect$att.egt,      
+    ci_lower = att_results_list_female[[i]]$dynamic_effect$att.egt - 1.96 * att_results_list_female[[i]]$dynamic_effect$se.egt,  
+    ci_upper = att_results_list_female[[i]]$dynamic_effect$att.egt + 1.96 * att_results_list_female[[i]]$dynamic_effect$se.egt,   
+    run = i  # Assign unique run ID
+  )
+})
+
+# Compute mean and confidence intervals across all runs
+summary_dynamic_results_female <- all_dynamic_results_female %>%
+  group_by(time_periods) %>%
+  summarise(
+    mean_estimate = mean(estimate, na.rm = TRUE),
+    mean_ci_lower = mean(ci_lower, na.rm = TRUE),
+    mean_ci_upper = mean(ci_upper, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Plot
+ggplot() +
+  # Add individual model results as transparent lines
+  geom_line(data = all_dynamic_results_female, 
+            aes(x = time_periods, y = estimate, group = run),
+            color = "gray", alpha = 0.2) +
+  geom_point(data = summary_dynamic_results_female, aes(x = time_periods, y = mean_estimate)) +
+  
+  # Add mean ATT estimates and confidence intervals
+  geom_line(data = summary_dynamic_results_female, 
+            aes(x = time_periods, y = mean_estimate), 
+            #color = "blue",
+            #size = 1
+            ) +
+  geom_ribbon(data = summary_dynamic_results_female, 
+              aes(x = time_periods, ymin = mean_ci_lower, ymax = mean_ci_upper), 
+              #fill = "blue",
+              alpha = 0.2) +
+  
+  # Add reference lines
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", linewidth = 1) +
+
+  # Labels and themes
+  labs(
+    title = "Dynamic ATT Over Time (Across Models)",
+    x = "Years Since Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(-10, 5, by = 5)) +
+  scale_y_continuous(breaks = seq(-2, 1, by = 1))
+
+```
+
+```{r}
+# Extract overall ATT estimates from all models
+att_overall_results_female <- map_df(att_results_list_female, function(x) {
+  tibble(
+    att_estimate = x$dynamic_effect$overall.att,  # Extract overall ATT
+    att_se = x$dynamic_effect$overall.se          # Extract standard error
+  )
+})
+
+# Ensure no missing values
+att_overall_results_female <- att_overall_results_female %>%
+  filter(!is.na(att_estimate)) %>%  # Remove any missing values
+  mutate(
+    ci_lower = att_estimate - 1.96 * att_se,
+    ci_upper = att_estimate + 1.96 * att_se
+  )
+
+# Summary statistics
+summary(att_overall_results_female)
+
+
+# Plot histogram of ATT estimates
+ggplot(att_overall_results_female, aes(x = att_estimate)) +
+  geom_histogram(binwidth = 0.025, fill = "steelblue", alpha = 0.7, color = "black") +
+  geom_vline(xintercept = mean(att_overall_results_female$att_estimate), linetype = "dashed", color = "red") +
+  labs(title = "Distribution of ATT Estimates Across Model Runs",
+       x = "ATT Estimate",
+       y = "Count") +
+  theme_minimal()
+```
+##Placebo Test: Pseudo Treatment Assignment 
+```{r}
+set.seed(123)
+
+# Step 1: Keep only never-treated units
+df_control_only <- df_CS_model_preparation %>%
+  filter(year_of_closure == 0)  # or treated_unit == FALSE
+
+# Step 2: Randomly select a subset of control units for pseudo-treatment
+pseudo_treated_ids <- df_control_only %>%
+  distinct(ARS) %>%
+  slice_sample(prop = 0.1)  # randomly select 10% of control units
+
+# Step 3: Assign each of these units a random treatment year (2010–2020)
+pseudo_treatment_years <- pseudo_treated_ids %>%
+  mutate(pseudo_treatment_year = sample(2010:2020, n(), replace = TRUE))
+
+# Step 4: Merge these fake years back into the full control-only dataset
+df_placebo_random_years <- df_control_only %>%
+  left_join(pseudo_treatment_years, by = "ARS") %>%
+  mutate(
+  year_of_closure_placebo = if_else(is.na(pseudo_treatment_year), 0, pseudo_treatment_year)
+  )
+
+# Step 5: Estimate placebo ATT
+att_placebo_random_years <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure_placebo",
+  data = df_placebo_random_years,
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 6: Aggregate & plot
+agg_placebo_random_years <- aggte(
+  att_placebo_random_years, 
+  type = "dynamic",
+  min_e = -10,
+  max_e = 8,
+bstrap = TRUE)
+
+summary(agg_placebo_random_years)
+
+# Optional plot
+ggdid(agg_placebo_random_years)
+
+```
+
+```{r}
+# Step 1: Filter relevant data
+df_placebo_pre2015 <- df_CS_model_preparation %>%
+  filter(
+    (treatment_status_spillover == "control") |
+    (treatment_status_spillover == "direct_treated" & year_of_closure >= 2016)
+  ) %>%
+  mutate(
+    # Assign placebo treatment year for treated units
+    year_of_closure_placebo = if_else(treatment_status_spillover == "direct_treated", 2011, 0)
+  ) %>%
+  filter(Year <= 2015)  # Only keep pre-2015 period
+
+# Optional check: table of treatment assignment
+table(df_placebo_pre2015$year_of_closure_placebo)
+
+# Step 2: Estimate ATT with placebo treatment
+att_placebo_pre2015 <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure_placebo",
+  data = df_placebo_pre2015,
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 3: Aggregate dynamic effects (just in case, only pre-treatment years expected)
+att_placebo_pre2015_dynamic <- aggte(
+  att_placebo_pre2015,
+  type = "dynamic",
+#  max_e = 3,  # Short window after placebo
+  na.rm = TRUE,
+  bstrap = TRUE
+)
+
+# Step 4: Summary + plot
+summary(att_placebo_pre2015_dynamic)
+
+ggdid(att_placebo_pre2015_dynamic)
+
+```
+
+```{r}
+# Convert dynamic results to tidy format and label
+df_placebo_random <- broom::tidy(agg_placebo_random_years) %>%
+  mutate(
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment")),
+    model = "Random Placebo Timing"
+  )
+
+df_placebo_2011 <- broom::tidy(att_placebo_pre2015_dynamic) %>%
+  mutate(
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment")),
+    model = "Placebo Closure Year = 2011"
+  )
+
+# Combine into one dataframe
+df_placebo_combined <- bind_rows(df_placebo_random, df_placebo_2011)
+
+```
+
+```{r}
+plot_placebo_facet <- ggplot(df_placebo_combined, aes(x = event.time, y = estimate, color = period)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3, linewidth = 1.2) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+  facet_wrap(~ model, nrow = 1, scales = "free_x") +
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Placebo Treatment", "After Placebo Treatment")
+  ) +
+  labs(
+    title = NULL,
+    x = "Years Relative to Placebo Treatment",
+    y = "Estimated ATT (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    limits = c(-2, 2),  # Set fixed y-axis range from -2% to 2%
+    breaks = seq(-2, 2, by = 0.5),
+    minor_breaks = seq(-2, 2, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),  # options "cm", "pt", "mm"
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")  # facet labels
+  )
+
+plot_placebo_facet
+
+ggsave("images/plot_placebo_facet.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+
+## Distribution of additional Variables
+above under Excurse combine vovariates
+
+## Robustness Test: Subgroup Analyses, Gender and Rurality
+
+```{r}
+# Add facet label to gender data
+df_combined_gender <- df_combined_gender %>%
+  mutate(
+    facet_group = "By Gender",
+    group_period = paste(gender_group, period, sep = " - ")
+  )
+
+# Add facet label to rurality data
+df_combined_rurality <- all_dynamic_results_by_group_2 %>%
+  mutate(
+    facet_group = "By Rurality",
+    group_period = paste(municipality_type, period, sep = " - ")
+  )
+
+
+# Combine both subgroup datasets
+df_subgroup_facet_combined <- bind_rows(df_combined_gender, df_combined_rurality)
+
+# Custom color palette for all 4 group-period combinations
+subgroup_facet_colors <- c(
+  "Urban Region - Pre-Treatment"     = colorspace::lighten("#6A3D9A", amount = 0.25),
+  "Urban Region - Post-Treatment"    = "#6A3D9A",
+  "Rural Region - Pre-Treatment"     = colorspace::lighten("#B15928", amount = 0.25),
+  "Rural Region - Post-Treatment"    = "#B15928",
+  "Overall Employment - Pre-Treatment"    = colorspace::lighten("#88CCEE", amount = 0.3),
+  "Overall Employment - Post-Treatment"   = "#88CCEE",
+  "Female Employment - Pre-Treatment" = colorspace::lighten("#117733", amount = 0.3),
+  "Female Employment - Post-Treatment"= "#117733"
+)
+
+
+plot_subgroups_dynamic_ATT_facet <- ggplot(df_subgroup_facet_combined, 
+                                 aes(x = time_periods, y = estimate, color = group_period)) +
+
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high),
+                width = 0.5, position = position_dodge(width = 0.5), linewidth = 1.2) +
+
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  facet_wrap(~ facet_group, nrow = 1) +
+
+  scale_color_manual(
+    values = subgroup_facet_colors,
+    breaks = c(
+      "Overall Employment - Post-Treatment",
+      "Female Employment - Post-Treatment",
+      "Urban Region - Post-Treatment",
+      "Rural Region - Post-Treatment"
+    ),
+    labels = c("Overall Employment", "Female Employment", "Urban Region", "Rural Region"),
+    name = "Subgroup\n(Lighter = Pre-Treatment)"
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),  # options "cm", "pt", "mm"
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")  # facet labels
+  )
+
+
+plot_subgroups_dynamic_ATT_facet
+
+ggsave("images/plot_subgroups_dynamic_ATT_facet.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+
+## Robustness Test: Anticipation
+```{r anticipation 1 year}
+# Step 1: Estimate ATT using att_gt with 1-year anticipation
+CS_anticipation_results <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure",
+  data = df_CS_model_preparation_robustness_spillover %>%
+    filter(year_of_closure < 2021),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 1
+)
+
+# Step 2: Compute dynamic ATT
+CS_anticipation_dynamic_effect <- aggte(
+  CS_anticipation_results,
+  type = "dynamic",
+  max_e = 8,
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_anticipation_simple_effect <- aggte(
+  CS_anticipation_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_anticipation_dynamic_data <- broom::tidy(CS_anticipation_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store results
+CS_anticipation_results_combined <- list(
+  att_model = CS_anticipation_results,
+  dynamic_effect = CS_anticipation_dynamic_effect,
+  simple_effect = CS_anticipation_simple_effect
+)
+
+# Optional: Print summary outputs
+CS_anticipation_simple_effect
+CS_anticipation_dynamic_data
+
+```
+
+```{r}
+# Step 1: Tidy dynamic ATT results from both models
+model_no_anticipation_df <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(model = "Without Anticipation (Default)")
+
+model_anticipation_1_df <- broom::tidy(CS_anticipation_dynamic_effect) %>%
+  mutate(model = "Allowing 1-Year Anticipation")
+
+# Step 2: Combine and tag treatment period
+df_combined_models_test_anticipation <- bind_rows(
+  model_no_anticipation_df,
+  model_anticipation_1_df
+) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = factor(
+      model,
+      levels = c("Without Anticipation (Default)", "Allowing 1-Year Anticipation")
+    )
+  )
+```
+
+```{r}
+plot_dynamic_ATT_anticipation <- ggplot(df_combined_models_test_anticipation, 
+                                        aes(x = event.time, y = estimate, color = period)) +
+
+  # Main point estimates and error bars
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
+                width = 0.4, position = position_dodge(width = 0.5), linewidth = 1.2) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  # Facet by model (with readable layout)
+  facet_wrap(~ model, nrow = 1) +
+
+  # Manual color scale for treatment periods
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",   # consistent purple
+      "Post-Treatment" = "#855C75"   # consistent yellow-orange
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  # Labels and axes
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = .25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  # Theme styling
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),  # options "cm", "pt", "mm"
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")  # facet labels
+  )
+
+# Display the plot
+plot_dynamic_ATT_anticipation
+
+
+ggsave("images/plot_dynamic_ATT_anticipation.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+## Robustness Test: Spillover vs. No Spillover
+
+```{r}
+df_CS_model_preparation_robustness_spillover <- df_combined_hospital_data_employment_enriched %>%
+  filter(
+      treatment_status_spillover == "control" |
+      treatment_status_spillover == "direct_treated" |
+      treatment_status_spillover == "spillover"
+  ) %>%
+  mutate(
+  ARS = as.numeric(ARS),
+  year_of_closure = as.numeric(as.character(year_of_closure)),
+  year_of_closure = ifelse(is.na(year_of_closure), 0, year_of_closure),
+  )
+```
+
+```{r}
+# Step 1: Estimate ATT using att_gt (spillover-adjusted sample)
+CS_baseline_spillover_results <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation_robustness_spillover %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "nevertreated",          
+  anticipation = 0                         
+)
+
+# Step 2: Compute dynamic ATT
+CS_baseline_spillover_dynamic_effect <- aggte(
+  CS_baseline_spillover_results, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_baseline_spillover_simple_effect <- aggte(
+  CS_baseline_spillover_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_baseline_spillover_dynamic_data <- broom::tidy(CS_baseline_spillover_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store for future use
+CS_baseline_spillover_results_combined <- list(
+  att_model = CS_baseline_spillover_results,
+  dynamic_effect = CS_baseline_spillover_dynamic_effect,
+  simple_effect = CS_baseline_spillover_simple_effect
+)
+
+# Optional: display results
+CS_baseline_spillover_simple_effect
+CS_baseline_spillover_dynamic_data
+
+```
+
+```{r}
+# Step 1: Tidy and label each model version
+spillover_excluded_df <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(model = "Spillover Units Excluded")
+
+spillover_included_df <- broom::tidy(CS_baseline_spillover_dynamic_effect) %>%
+  mutate(model = "Spillover Units Included")
+
+# Step 2: Combine both versions and classify treatment periods
+df_spillover_comparison <- bind_rows(spillover_excluded_df, spillover_included_df) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = factor(model, levels = c("Spillover Units Excluded", "Spillover Units Included"))
+  )
+
+
+```
+
+```{r}
+plot_spillover_comparison <- ggplot(df_combined_models_test_spillover, 
+                                         aes(x = event.time, y = estimate, color = period)) +
+
+  # Main estimates
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.4, position = position_dodge(width = 0.5), linewidth = 1.2) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  # Facet by model (spillover inclusion/exclusion)
+  facet_wrap(~ model, nrow = 1) +
+
+  # Color: pre/post treatment
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  # Labels and axes
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),  # options "cm", "pt", "mm"
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")  # facet labels
+  )
+
+# Display the plot
+plot_spillover_comparison
+
+ggsave("images/plot_spillover_comparison.png",
+       width = 12, height = 5, dpi = 300)
+```
+
+## Robustness Test: Not Yet Treated vs. Never-Treated
+
+```{r}
+# Step 1: Estimate ATT using att_gt (alternative control group: not-yet-treated)
+CS_baseline_notyettreated_results <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation %>% 
+    filter(year_of_closure < 2021),        
+  xformla = ~ RegioStaR4from5,             
+  control_group = "notyettreated",         
+  anticipation = 0                         
+)
+
+# Step 2: Compute dynamic ATT
+CS_baseline_notyettreated_dynamic_effect <- aggte(
+  CS_baseline_notyettreated_results, 
+  type = "dynamic",
+  max_e = 8, 
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_baseline_notyettreated_simple_effect <- aggte(
+  CS_baseline_notyettreated_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results for plotting
+CS_baseline_notyettreated_dynamic_data <- broom::tidy(CS_baseline_notyettreated_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store results
+CS_baseline_notyettreated_results_combined <- list(
+  att_model = CS_baseline_notyettreated_results,
+  dynamic_effect = CS_baseline_notyettreated_dynamic_effect,
+  simple_effect = CS_baseline_notyettreated_simple_effect
+)
+
+# Optional: View outputs
+CS_baseline_notyettreated_simple_effect
+CS_baseline_notyettreated_dynamic_data
+```
+
+```{r}
+# Step 1: Prepare dynamic results from each model
+model_never_treated_df <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(model = "Control Group: Never Treated Units")
+
+model_not_yet_treated_df <- broom::tidy(CS_baseline_notyettreated_dynamic_effect) %>%
+  mutate(model = "Control Group: Not-Yet-Treated Units")
+
+# Step 2: Combine and label periods and model
+df_combined_models_test_notyettreated <- bind_rows(
+  model_never_treated_df,
+  model_not_yet_treated_df
+) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = factor(
+      model,
+      levels = c(
+        "Control Group: Never Treated Units",
+        "Control Group: Not-Yet-Treated Units"
+      )
+    )
+  )
+
+```
+
+```{r}
+plot_notyettreated_comparison <- ggplot(df_combined_models_test_notyettreated, 
+                                        aes(x = event.time, y = estimate, color = period)) +
+  
+  # Main estimates + CI
+  geom_point(size = 2, position = position_dodge(width = 0.3)) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), 
+                width = 0.4, 
+                position = position_dodge(width = 0.3)) +
+
+  # Reference lines
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+
+  # Facet for comparison
+  facet_wrap(~ model, nrow = 1) +
+
+  # Standardized treatment period colors
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",   # muted purple
+      "Post-Treatment" = "#D9AF6B"   # soft gold
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  # Labels and axes
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+plot_notyettreated_comparison
+
+
+ggsave("images/plot_notyettreated_comparison.jpg",
+       width = 8, height = 6, dpi = 300)
+
+```
+

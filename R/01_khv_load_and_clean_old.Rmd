@@ -1,0 +1,950 @@
+---
+title: "KHV_import"
+author: "Niklas Pawelzik"
+date: "2024-07-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Import data from "Krankenhausverzeichnis"
+
+```{r load KHV data}
+# Define the base directory for the hospital directory (Krankenhausverzeichnis, hospital register) Excel files
+KHV_base_path <- "./raw_data/Krankenhausverzeichnis_2003_2022/"
+
+# Define the years for which data needs to be loaded (2008–2021) and for later use complete list as well
+years_2021_2008 <- c(2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
+all_years_KHV <- c(2022, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
+
+# Loop through the years and dynamically read in the corresponding Excel files
+for (year in years_2021_2008) {
+  
+  # Construct the full file path for the respective year's Excel file
+  file_path <- paste0(KHV_base_path, "KHV_", year, ".xlsx")
+  
+  # Read the Excel file, selecting sheet 5 and skipping the first 4 rows
+  df <- read_excel(file_path, sheet = 5, skip = 4)
+  
+  # Assign the dataframe to a dynamically named variable in the global environment
+  assign(paste0("df_khv_", year), df)
+}
+
+# Special handling for 2022:
+# Read the 2022 Excel file from sheet 5 but skip only the first 2 rows
+df_khv_2022 <- read_excel(paste0(KHV_base_path, "KHV_2022.xlsx"), sheet = 5, skip = 2)
+
+
+```
+
+##Initial Data Cleaning
+
+```{r create dataframes for each year with a column "year"}
+# Function to detect hospital directory (KHV) DataFrames and add a 'year' column
+khv_add_year_column <- function(df_name) {
+  
+  # Retrieve the DataFrame dynamically based on its name
+  df <- get(df_name)
+  
+  # Extract the year from the DataFrame name (assumes format "df_khv_YYYY")
+  year <- sub("df_khv_", "", df_name)
+  
+  # Add the 'year' column with the extracted year as a numeric value
+  df$year <- as.numeric(year)
+  
+  # Save the modified DataFrame back into the Global Environment
+  assign(df_name, df, envir = .GlobalEnv)
+}
+
+# Retrieve all object names currently stored in the Global Environment
+all_objects <- ls()
+
+# Identify all objects that match the pattern 'df_khv_' followed by a four-digit year
+khv_dfs <- grep("^df_khv_\\d{4}$", all_objects, value = TRUE)
+
+# Loop through the filtered DataFrames and add the 'year' column to each
+for (df_name in khv_dfs) {
+  khv_add_year_column(df_name)
+}
+
+# Verify that the 'year' column was added correctly by printing a sample DataFrame
+#print(head(df_khv_2021))
+```
+
+
+```{r create shared address column "Adresse" for all KHV dataframes}
+# Retrieve all object names currently stored in the Global Environment
+all_objects <- ls()
+
+# Identify all objects that match the pattern 'df_khv_' followed by a four-digit year
+khv_dfs <- grep("^df_khv_\\d{4}$", all_objects, value = TRUE)
+
+# Define primary and alternative column names for address data
+primary_columns_address <- c("Straße/Hausnr", "PLZ", "Ort")
+alternative_columns_address_1 <- c("Adresse _Strasse/Haus-Nr.", "Adresse _Zustellbezogene Postleitzahl und Ort")
+alternative_columns_address_2 <- c("Adresse_Strasse_Standort", "Adresse_Haus-Nr._Standort", 
+                                   "Adresse_Postleitzahl_Standort", "Adresse_Ort_Standort")
+
+# Function to check for address columns, remove duplicates, and create a standardized "Adresse" column
+check_and_create_address <- function(df_name, primary_columns_address, 
+                                     alternative_columns_address_1, alternative_columns_address_2) {
+  # Retrieve the DataFrame dynamically based on its name
+  df <- get(df_name)
+  
+  # Check if the primary address columns exist and create "Adresse" column accordingly
+  if (all(primary_columns_address %in% colnames(df))) {
+    df <- df %>%
+      mutate(Adresse = paste(`Straße/Hausnr`, PLZ, Ort, sep = ", "))
+  
+  # Check if the first set of alternative columns exist and use them instead
+  } else if (all(alternative_columns_address_1 %in% colnames(df))) {
+    df <- df %>%
+      mutate(Adresse = paste(`Adresse _Strasse/Haus-Nr.`, 
+                             `Adresse _Zustellbezogene Postleitzahl und Ort`, sep = ", "))
+  
+  # Check if the second set of alternative columns exist and use them instead
+  } else if (all(alternative_columns_address_2 %in% colnames(df))) {
+    df <- df %>%
+      mutate(Adresse = paste(`Adresse_Strasse_Standort`, `Adresse_Haus-Nr._Standort`, 
+                             `Adresse_Postleitzahl_Standort`, `Adresse_Ort_Standort`, sep = ", "))
+  
+  # If none of the required columns are found, print a warning message and return NULL
+  } else {
+    cat(df_name, ": does NOT contain the required address columns\n")
+    return(NULL)
+  }
+  
+  # Save the modified DataFrame back into the Global Environment
+  assign(df_name, df, envir = .GlobalEnv)
+  return(df_name)
+}
+
+# Initialize a list to store results of successful transformations
+results <- list()
+
+# Loop through the identified DataFrames, check columns, and add the standardized address column
+for (df_name in khv_dfs) {
+  result <- check_and_create_address(df_name, primary_columns_address, 
+                                     alternative_columns_address_1, alternative_columns_address_2)
+  if (!is.null(result)) {
+    results[[df_name]] <- result
+  }
+}
+
+# Print confirmation messages for successfully modified DataFrames
+# for (df_name in names(results)) {
+#   cat(df_name, ": 'Adresse' column successfully added\n")
+# }
+```
+
+
+```{r create shared name column "Name" for all KHV dataframes}
+# Define primary and alternative column names for hospital names
+primary_columns_name <- c("Name1", "Name2", "Name3", "Name4")
+alternative_columns_name_1 <- c("Adresse _1. Zeile", "Adresse _2. Zeile", "Adresse _3. Zeile", "Adresse _3. Zeile")
+alternative_columns_name_2 <- c("Adresse_Name", "Adresse_Name_Standort")
+
+# Function to check for name columns, remove duplicates, and create a standardized "Name" column
+check_and_create_name <- function(df_name, primary_columns_name, alternative_columns_name_1, alternative_columns_name_2) {
+  
+  # Retrieve the DataFrame dynamically based on its name
+  df <- get(df_name)
+  
+  # Check if the primary name columns exist and create the "Name" column accordingly
+  if (all(primary_columns_name %in% colnames(df))) {
+    df <- df %>%
+      mutate(Name = apply(df[, primary_columns_name], 1, paste, collapse = ", "))
+  
+  # Check if the first set of alternative name columns exist and use them instead
+  } else if (all(alternative_columns_name_1 %in% colnames(df))) {
+    df <- df %>%
+      mutate(Name = apply(df[, alternative_columns_name_1], 1, paste, collapse = ", "))
+  
+  # Check if the second set of alternative name columns exist and use them instead
+  } else if (all(alternative_columns_name_2 %in% colnames(df))) {
+    df <- df %>%
+      mutate(Name = apply(df[, alternative_columns_name_2], 1, paste, collapse = ", "))
+  
+  # If none of the required columns are found, print a warning message and return NULL
+  } else {
+    cat(df_name, ": does NOT contain the required name columns\n")
+    return(NULL)
+  }
+  
+  # Save the modified DataFrame back into the Global Environment
+  assign(df_name, df, envir = .GlobalEnv)
+  return(df_name)
+}
+
+# Initialize a list to store results of successful transformations
+results <- list()
+
+# Loop through the identified DataFrames, check columns, and add the standardized name column
+for (df_name in khv_dfs) {
+  result <- check_and_create_name(df_name, primary_columns_name, alternative_columns_name_1, alternative_columns_name_2)
+  if (!is.null(result)) {
+    results[[df_name]] <- result
+  }
+}
+
+# Print confirmation messages for successfully modified DataFrames
+# for (df_name in names(results)) {
+#   cat(df_name, ": 'Name' column successfully added\n")
+# }
+```
+
+```{r}
+# Initialize an empty list to store the DataFrames
+dfs_list <- list()
+
+# Loop through each year and add the DataFrames to the list
+for (year in all_years_KHV) {
+  df_name <- paste0("df_khv_", year)
+  
+  # Check if the DataFrame exists
+  if (exists(df_name)) {
+    # Retrieve the DataFrame
+    df <- get(df_name)
+    
+    # Check if the column "Träger" exists and rename it to "Traeger"
+    if ("Träger" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "Träger"] <- "Traeger"
+    }
+    
+        if ("Art" %in% colnames(df)) {
+      colnames(df)[colnames(df) == "Art"] <- "EinrichtungsTyp"
+    }
+    
+    # Assign the modified DataFrame back to the original variable name
+    assign(df_name, df)
+    
+    # Add the DataFrame to the list
+    dfs_list[[df_name]] <- df
+  }
+}
+
+# Optional: Check the content of the list to ensure DataFrames are correctly added and modified
+# dfs_list
+```
+
+
+```{r create "slim" version of dataframes with selected columns, create a combined slim dataframe}
+# Loop through all years in `all_years_KHV` to create a "slim" version of the hospital directory data
+for (year in all_years_KHV) {
+  
+  # Construct the dynamic DataFrame name based on the current year
+  df_name <- paste0("df_khv_", year)
+  
+  # Check if the DataFrame exists in the Global Environment
+  if (exists(df_name)) {
+    
+    # Retrieve the DataFrame dynamically
+    df <- get(df_name)
+    
+    # Add the 'year' column to the dataset
+    df <- df %>% mutate(year = year)
+    
+    # Select only the relevant columns to create a "slim" version of the dataset
+    df_slim <- df %>% select(Name, Adresse, year, Land, Kreis, Gemeinde, Traeger, EinrichtungsTyp)
+    
+    # Save the modified slim DataFrame back into the Global Environment with a new name
+    assign(paste0("df_khv_", year, "_slim"), df_slim)
+  
+  } else {
+    # Print a message if the DataFrame does not exist
+    cat(df_name, "does not exist in the Global Environment.\n")
+  }
+}
+
+# Initialize an empty list to store all "slim" DataFrames
+slim_dfs_list <- list()
+
+# Loop through all years and add the corresponding "slim" DataFrames to the list
+for (year in all_years_KHV) {
+  
+  # Construct the DataFrame name for the slim version
+  df_name <- paste0("df_khv_", year, "_slim")
+  
+  # Check if the "slim" DataFrame exists in the Global Environment
+  if (exists(df_name)) {
+    
+    # Retrieve the DataFrame and store it in the list
+    slim_dfs_list[[df_name]] <- get(df_name)
+  
+  } else {
+    # Print a message if the DataFrame does not exist
+    cat(df_name, "does not exist in the Global Environment.\n")
+  }
+}
+
+# Combine all "slim" DataFrames from the list into a single DataFrame
+KHV_combined_df_slim <- do.call(rbind, slim_dfs_list)
+
+# Output the combined dataset
+#print(KHV_combined_df_slim)
+```
+
+## Geocode Dataframes of Hospitals from "Krankenhausverzeichnis"
+
+```{r create df of all unique addresses in KVH dataset}
+KHV_combined_df_slim_unique_addresses <- KHV_combined_df_slim %>%
+  distinct(Adresse, .keep_all = TRUE)
+
+```
+
+```{r first geocode all addresses in KVH dataset}
+KHV_combined_df_slim_unique_addresses_geocoded <- KHV_combined_df_slim_unique_addresses %>%
+  geocode(Adresse, method = 'osm', lat = latitude, long = longitude)
+```
+
+```{r rerun geocode after creating proxi-address without house number}
+# check for NAs, thus Addresses that need cleaning/ manual geocoding
+df_khv_na_coord <- KHV_combined_df_slim_unique_addresses_geocoded %>%
+  filter(is.na(latitude)) 
+
+df_khv_na_coord <- df_khv_na_coord %>%
+  mutate(postleitzahl_und_ort = str_extract(Adresse, "\\d{5},?\\s+(Bad\\s+\\w+|\\w+)"))
+
+# Extract part of Adress until first digit or comma
+df_khv_na_coord <- df_khv_na_coord %>%
+  mutate(Strasse = str_extract(Adresse, "^[^\\d,]+"))
+
+# Extract part of Adress until first digit or comma
+df_khv_na_coord <- df_khv_na_coord %>%
+  mutate(Ungefähre_Adresse = str_extract(Adresse, "^[^\\d,]+"))
+
+# Merge columns "Strasse" and "postleitzahl_und_ort" to new column "Ungefähre_Adresse"
+df_khv_na_coord <- df_khv_na_coord %>%
+  mutate(Ungefähre_Adresse = paste(Strasse, postleitzahl_und_ort, sep = ", "))
+
+```
+
+```{r}
+df_khv_na_coord <- df_khv_na_coord %>%
+  geocode(Ungefähre_Adresse, method = 'osm', lat = latitude_ungefähr, long = longitude_ungefähr)
+```
+
+
+```{r slim is created further below, thus no need for this here}
+df_khv_2008_slim_geocoded <- df_khv_2008_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2009_slim_geocoded <- df_khv_2009_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2010_slim_geocoded <- df_khv_2010_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2011_slim_geocoded <- df_khv_2011_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2012_slim_geocoded <- df_khv_2012_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2013_slim_geocoded <- df_khv_2013_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2014_slim_geocoded <- df_khv_2014_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2015_slim_geocoded <- df_khv_2015_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2016_slim_geocoded <- df_khv_2016_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2018_slim_geocoded <- df_khv_2018_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2019_slim_geocoded <- df_khv_2019_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2020_slim_geocoded <- df_khv_2020_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2021_slim_geocoded <- df_khv_2021_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+df_khv_2022_slim_geocoded <- df_khv_2022_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded, by = "Adresse")
+
+```
+
+
+```{r}
+file_path <- file.path("cleaned_data", "df_khv_na_coord.csv")
+write.csv(df_khv_na_coord, file_path)
+```
+
+```{r}
+file_path <- file.path("cleaned_data", "KHV_combined_df_slim_unique_addresses_geocoded.csv")
+write_csv(KHV_combined_df_slim_unique_addresses_geocoded, file_path)
+```
+
+
+```{r}
+file_path <- file.path("cleaned_data", "df_khv_na_coord.csv")
+df_khv_na_coord_import <- read.csv(file_path)
+```
+
+```{r}
+file_path <- file.path("cleaned_data", "KHV_combined_df_slim_unique_addresses_geocoded.csv")
+KHV_combined_df_slim_unique_addresses_geocoded_import <- read.csv(file_path)
+```
+
+
+```{r check for still remaining failed geocoding attempts}
+df_khv_na_coord_import_na <- df_khv_na_coord_import %>%
+  filter(is.na(latitude_ungefähr)) %>%
+  select(Name, year, Adresse, latitude, longitude, Ungefähre_Adresse, latitude_ungefähr, longitude_ungefähr)
+```
+
+```{r insert manually performed geocoding results}
+# Define new Coordinates
+coordinates <- c(
+  "54.3007378301664, 9.667209332011566",
+  "53.67280797386078, 10.241451411079519",
+  "53.730643860357944, 10.263394197590355",
+  "53.54874421200132, 9.98509339758018",
+  "53.595284674580384, 9.472673311075216",
+  "51.49223475180568, 6.515867239794519",
+  "51.06840456515223, 7.004709597443175",
+  "51.64193661380819, 7.33777329747444",
+  "51.65739745106946, 6.955756132666728",
+  "51.69078776841883, 7.1854151263129795",
+  "52.023373094583235, 8.523434868659498",
+  "50.54611578932454, 9.705155968579067",
+  "51.616092271838276, 9.590719826308879",
+  "51.11498581224855, 9.10916075511742",
+  "48.95724879530504, 9.135733310822653",
+  "48.34460046400002, 7.886185568462257",
+  "48.33429907421839, 8.348290497297606",
+  "48.35562195654074, 11.389692691265154",
+  "48.35380945642544, 11.785189539626879",
+  "49.412768593560436, 6.909779010846718",
+  "52.560425316716035, 13.447402439853306",
+  "53.42996502628423, 11.85468769757347",
+  "50.328775314711066, 12.289651936003716",
+  "51.03125322438338, 12.159282912784594",
+  "51.792626023114046, 10.954903797482668",
+  "50.889952503802846, 11.266260182090011",
+  "53.614369865955986, 10.02415579758383",
+  "50.42123125036706, 7.577408526244057",
+  "48.7829755163986, 9.171021754992855",
+  "48.898089496494904, 9.203880395476082",
+  "47.90734650522639, 7.700366197249361",
+  "48.00352563572804, 7.936729297280432",
+  "48.344562118171105, 7.886183682489674",
+  "47.95553419712632, 8.480241212621337",
+  "47.76316877292811, 8.838695241605368",
+  "48.50047971667056, 10.117473183813848",
+  "48.232538297297836, 12.674873210784714",
+  "48.35548610945312, 11.389742504796779",
+  "48.35442208266689, 13.20208358195523",
+  "53.429971418577026, 11.854698426409335",
+  "54.61637354766032, 8.984564968804616",
+  "54.373151466943334, 10.963546768790753",
+  "53.52976280417273, 8.615588011071466",
+  "51.29370558985879, 7.312290968619545",
+  "50.18665097154291, 8.456038410887956",
+  "50.35372154508464, 7.5869473820610915",
+  "48.00352563572804, 7.936729297280432",
+  "48.3343204712658, 8.348247581954142",
+  "47.763252983081145, 8.838248410760405",
+  "48.411105714477195, 9.941417581958197",
+  "48.35380945642544, 11.785189539626879",
+  "49.448861721620865, 10.999129982012837",
+  "52.56040574974825, 13.447380982181574",
+  "51.14242591351721, 13.033444459530912",
+  "51.27519204190517, 12.942737587239465",
+  "51.10581610819018, 10.65204421278866",
+  "50.88995927167952, 11.266313826269341",
+  "51.14242591351721, 13.033444459530912",
+  "48.3343204712658, 8.348247581954142",
+  "48.411105714477195, 9.941417581958197",
+  "53.52976280417273, 8.615588011071466",
+  "54.61637354766032, 8.984564968804616",
+  "51.29370558985879, 7.312290968619545",
+  "51.10581610819018, 10.65204421278866",
+  "48.06159652230864, 12.201976954462783",
+  "50.35360517157396, 7.5869473820610915",
+  "50.95487938923783, 13.754836159078318",
+  "47.81567997120982, 12.205747810763095",
+  "48.00352563572804, 7.936729297280432",
+  "54.37307647180737, 10.963514582283155",
+  "47.763252983081145, 8.838248410760405",
+  "50.889952503802846, 11.266260182090011",
+  "49.448861721620865, 10.999129982012837",
+  "53.57821386243095, 10.053005939910083",
+  "49.70639269700326, 7.677042740094822",
+  "51.16308912949025, 11.817079130985002",
+  "51.2340871539991, 6.82077908395976",
+  "51.97956225523396, 7.617505482149504",
+  "49.80901933245206, 6.690297294200677",
+  "47.76247275879023, 8.836043939067848",
+  "53.54477824736183, 13.294211782236403",
+  "51.61603897716075, 9.590676910965415",
+  "52.267073406145926, 12.925737811001154",
+  "51.409674103455345, 9.63575975513344",
+  "49.621774797572265, 7.335841229962489",
+  "53.54477824736183, 13.294211782236403",
+  "50.970426252598216, 13.461653528124781",
+  "51.29367875366837, 7.3123016974554105",
+  "50.9704532773021, 13.461610612781318",
+  "52.13738697196335, 11.624457468665746",
+  "47.747251728925654, 11.451417897267136",
+  "54.37315136854216, 10.96353636879082",
+  "51.409674103455345, 9.63575975513344",
+  "52.444155828430695, 9.740024268682692",
+  "51.97684609090119, 7.617516739821061",
+  "51.33516711066627, 8.215192912801134",
+  "49.621774797572265, 7.335841229962489",
+  "47.81567997120982, 12.205747810763095",
+  "53.54477824736183, 13.294211782236403",
+  "51.32847764801089, 12.387475310949721"
+)
+
+# add coordinates as new column
+df_khv_na_coord_import_na$coordinates <- coordinates
+
+df_khv_na_coord_import_na <- df_khv_na_coord_import_na %>%
+  mutate(
+    latitude_coord = as.numeric(sub(",.*", "", coordinates)),
+    longitude_coord = as.numeric(sub(".*,", "", coordinates))
+  ) 
+```
+
+
+```{r reinserting missing geocoding in complete dataframe of unique addresses}
+df_khv_na_coord_import_geocoded <-  df_khv_na_coord_import %>%
+  left_join(df_khv_na_coord_import_na, by = "Adresse")  %>%
+  select(
+    Name.x,
+    Adresse,
+    latitude.x,
+    longitude.x,
+    year.x,
+    Ungefähre_Adresse.x,
+    latitude_ungefähr.x,
+    longitude_ungefähr.x,
+    coordinates,
+    latitude_coord,
+    longitude_coord
+  )
+
+KHV_combined_df_slim_unique_addresses_geocoded_import_complete <- 
+  KHV_combined_df_slim_unique_addresses_geocoded_import %>%
+  left_join(df_khv_na_coord_import_geocoded, by = "Adresse") %>%
+  mutate(
+    latitude = coalesce(latitude, latitude_ungefähr.x, latitude_coord),
+    longitude = coalesce(longitude, longitude_ungefähr.x, longitude_coord)
+  ) %>%
+  select(
+    -Name.x,
+    - latitude.x,
+    - longitude.x,
+    - year.x,
+    - latitude_ungefähr.x,
+    - latitude_coord,
+    - longitude_ungefähr.x,
+    - longitude_coord,
+    - year
+  )
+```
+
+
+```{r}
+KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim <- KHV_combined_df_slim_unique_addresses_geocoded_import_complete %>%
+  select(
+    Adresse,
+    latitude,
+    longitude,
+    Ungefähre_Adresse.x,
+    coordinates
+  )
+
+df_khv_2008_slim_geocoded <- df_khv_2008_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2009_slim_geocoded <- df_khv_2009_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2010_slim_geocoded <- df_khv_2010_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2011_slim_geocoded <- df_khv_2011_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2012_slim_geocoded <- df_khv_2012_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2013_slim_geocoded <- df_khv_2013_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2014_slim_geocoded <- df_khv_2014_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2015_slim_geocoded <- df_khv_2015_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2016_slim_geocoded <- df_khv_2016_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2018_slim_geocoded <- df_khv_2018_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2019_slim_geocoded <- df_khv_2019_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2020_slim_geocoded <- df_khv_2020_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2021_slim_geocoded <- df_khv_2021_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+df_khv_2022_slim_geocoded <- df_khv_2022_slim %>%
+  left_join(KHV_combined_df_slim_unique_addresses_geocoded_import_complete_slim, by = "Adresse")
+
+```
+
+```{r identifying addresses with remaining NAs on 2022 dataframe}
+df_khv_2022_slim_geocoded_NA_coord <- df_khv_2022_slim_geocoded %>%
+    filter(is.na(latitude))
+```
+
+```{r first attempt geocode remaining 2022 NAs}
+df_khv_2022_slim_geocoded_2 <- df_khv_2022_slim_geocoded_NA_coord %>%
+  geocode(Adresse, method = 'osm', lat = latitude, long = longitude)
+```
+
+```{r insert manually performed geocoding results}
+# Define new Coordinates
+new_coordinates <- c(
+  "49.37735600087202, 10.200192912486804", #1
+  "50.77278557165554, 6.2294263107164", #2
+  "51.77241174959895, 10.791016397275904", #3
+  "50.871411211716875, 6.867342928835008", #4
+  "50.937158098825655, 11.288091097230312", #5
+  "51.774988710357995, 6.139348253100987", #6
+  "50.822071882614416, 6.986239512564164", # 7
+  "50.815262117071114, 6.48509019023977", #8
+  "50.79589292706086, 6.233821568387719", #9
+  "51.47240050600508, 7.012219339589449", #10
+  "51.43443426025856, 6.98844321075239", #11
+  "51.44029160899135, 6.969373168422707", #12
+  "51.45775879390183, 8.856834670723734", #13
+  "52.214932198413784, 11.729225326135259", #14
+  "55.01380017546306, 8.423562057670015", #15
+  "51.43102646075685, 7.005378654927263", #16
+  "51.46506882761971, 8.843778139589052", #17
+  "51.94911050314899, 13.787651026120619" #18
+)
+
+
+df_khv_2022_slim_geocoded_3 <- df_khv_2022_slim_geocoded_2 %>%
+    filter(is.na(latitude...13)) %>%
+    arrange(Name)
+
+# add coordinates as new column
+df_khv_2022_slim_geocoded_3$coordinates <- new_coordinates
+
+df_khv_2022_slim_geocoded_3 <- df_khv_2022_slim_geocoded_3 %>%
+  select(
+    Adresse,
+    coordinates
+  )
+```
+
+```{r}
+df_khv_2022_slim_geocoded_2_complete <- df_khv_2022_slim_geocoded_2 %>%
+  left_join(df_khv_2022_slim_geocoded_3, by = "Adresse") %>%
+  select(
+    Adresse,
+    coordinates.y,
+    latitude...13,
+    longitude...14
+  ) %>%
+  rename(
+    coordinates = coordinates.y,
+    latitude =  latitude...13,
+    longitude = longitude...14
+  ) %>%
+  mutate(
+    latitude_coord = as.numeric(sub(",.*", "", coordinates)),
+    longitude_coord = as.numeric(sub(".*,", "", coordinates))
+  ) %>%
+  mutate(
+    latitude = coalesce(latitude, latitude_coord),
+    longitude = coalesce(longitude, longitude_coord)
+  ) %>%
+  select(
+    - latitude_coord,
+    - longitude_coord,
+    - coordinates
+  ) %>%
+  group_by(Adresse) %>%
+  slice(1) %>%
+  ungroup()
+
+df_khv_2022_slim_geocoded_complete <- 
+  df_khv_2022_slim_geocoded %>%
+  left_join(df_khv_2022_slim_geocoded_2_complete, by = "Adresse") %>%
+  mutate(
+    latitude = coalesce(latitude.x, latitude.y),
+    longitude = coalesce(longitude.x, longitude.y)
+  ) %>%
+  select(
+    - latitude.x,
+    - latitude.y,
+    - longitude.x,
+    - longitude.y
+  )
+
+df_khv_2022_slim_geocoded <- df_khv_2022_slim_geocoded_complete
+```
+
+```{r}
+# Loop through each year and export the corresponding dataframe
+for (year in all_years_KHV) {
+  # Construct the dataframe name as a string
+  df_name <- paste0("df_khv_", year, "_slim_geocoded")
+  
+  # Use get() to retrieve the dataframe by its name
+  df <- get(df_name)
+
+  # Construct the filename for the CSV
+  file_path <- file.path("cleaned_data", paste0("df_khv_", year, "_slim_geocoded.csv"))
+
+  # Export the dataframe to a CSV file
+  write.csv(df, file_path, row.names = FALSE)
+}
+```
+
+
+## Import Geocoded Data from "Krankenhausverzeichnis" 
+
+
+```{r}
+# Define the years for which data needs to be loaded (2008–2021) and for later use complete list as well
+all_years_KHV <- c(2022, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
+
+# Initialize an empty list to store the imported DataFrames
+dfs_list <- list()
+
+# Loop through each year and import the corresponding CSV files
+for (year in all_years_KHV) {
+  # Construct the filename for the CSV
+  file_path <- file.path("cleaned_data", paste0("df_khv_", year, "_slim_geocoded.csv"))
+  
+  # Check if the file exists
+  if (file.exists(file_path)) {
+    # Read the CSV file into a DataFrame
+    df <- read.csv(file_path)
+    
+    # Construct the dataframe name as a string
+    df_name <- paste0("df_khv_", year, "_slim_geocoded")
+    
+    # Assign the imported DataFrame to the list
+    dfs_list[[df_name]] <- df
+    
+    # Optionally, assign the DataFrame to the global environment
+    assign(df_name, df)
+  }
+}
+
+# Step 1: Check for duplicates based on the combination of "Name" and "Adresse"
+duplicates <- duplicated(df_khv_2022_slim_geocoded[, c("Name", "Adresse")])
+
+# Step 2: Summarize the results
+if (any(duplicates)) {
+  print("There are duplicate rows based on the combination of Name and Adresse.")
+  # Optionally, you can print the duplicate rows
+  print(df_khv_2022_slim_geocoded[duplicates, ])
+} else {
+  print("All rows are unique based on the combination of Name and Adresse.")
+}
+
+filtered_rows <- subset(df_khv_2022_slim_geocoded, Name == "Klinikum St. Georg GmbH, Hauptstandort Leipzig Eutritzsch, PIA - VGP Eitingonstr.")
+
+# confirm no more duplicates 
+if (nrow(filtered_rows) <= 1 || all(sapply(2:nrow(filtered_rows), function(i) identical(filtered_rows[1, ], filtered_rows[i, ])))) {
+  print("All filtered rows are identical across all columns.")
+} else {
+  print("The filtered rows are not identical across all columns.")
+}
+```
+## Excurse: Plot Annual Maps 
+
+```{r plotting maps of KHV data by year}
+# Loop through each year and convert the EinrichtungsTyp column to character
+for (year in all_years_KHV) {
+  # Construct the dataframe name as a string
+  df_name <- paste0("df_khv_", year, "_slim_geocoded")
+  
+  # Check if the DataFrame exists
+  if (exists(df_name)) {
+    # Retrieve the DataFrame
+    df <- get(df_name)
+    
+    # Check if the column "EinrichtungsTyp" exists and convert it to character
+    if ("EinrichtungsTyp" %in% colnames(df)) {
+      df$EinrichtungsTyp <- as.character(df$EinrichtungsTyp)
+    }
+    
+    # Assign the modified DataFrame back to the original variable name
+    assign(df_name, df)
+  }
+}
+
+# preparing ggplot maps
+var_color <- "Land"
+var_shape <- "EinrichtungsTyp"
+de <- map_data("world", region = "Germany")
+
+# KHV map of hospitals 2022
+map_hospitals_khv_2022 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2022_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2022 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2021
+map_hospitals_khv_2021 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2021_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2021 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2020
+map_hospitals_khv_2020 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2020_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2020 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2019
+map_hospitals_khv_2019 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2019_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2019 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2018
+map_hospitals_khv_2018 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2018_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2018 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2016
+map_hospitals_khv_2016 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2016_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2016 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2015
+map_hospitals_khv_2015 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2015_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2015 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2014
+map_hospitals_khv_2014 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2014_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2014 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2013
+map_hospitals_khv_2013 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2013_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2013 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2012
+map_hospitals_khv_2012 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2012_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2012 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2011
+map_hospitals_khv_2011 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2011_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2011 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2010
+map_hospitals_khv_2010 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2010_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2010 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+
+# KHV map of hospitals 2009
+map_hospitals_khv_2009 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2009_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2009 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# KHV map of hospitals 2008
+map_hospitals_khv_2008 <- ggplot() +
+  geom_sf(data = SHP_3, color = "grey20", fill = "grey80", linewidth = .5, linetype = "dashed") +
+  geom_sf(data = SHP_1, color = "black", fill = NA, linewidth  = 1.5) +
+  geom_point(data = df_khv_2008_slim_geocoded, aes(x = longitude, y = latitude, shape = get(var_shape), color = get(var_color), size = 1)) +
+  theme_void() +
+  coord_sf(xlim = c(5, 15), ylim = c(47, 55), expand = FALSE) +
+  labs(title = "Krankenhäuser in Deutschland 2008 nach KHV",
+       subtitle = "",
+       caption = "Quelle: Eurostat und eigene Daten")
+
+# show maps
+print(map_hospitals_khv_2022)
+print(map_hospitals_khv_2021)
+print(map_hospitals_khv_2020)
+print(map_hospitals_khv_2019)
+print(map_hospitals_khv_2018)
+print(map_hospitals_khv_2016)
+print(map_hospitals_khv_2015)
+print(map_hospitals_khv_2014)
+print(map_hospitals_khv_2013)
+print(map_hospitals_khv_2012)
+print(map_hospitals_khv_2011)
+print(map_hospitals_khv_2010)
+print(map_hospitals_khv_2009)
+print(map_hospitals_khv_2008)
+```

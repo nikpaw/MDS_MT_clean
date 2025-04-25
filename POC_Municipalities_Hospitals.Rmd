@@ -1,0 +1,221 @@
+---
+title: "POC_Municipalities_Hospitals"
+author: "Niklas Pawelzik"
+date: "2024-10-24"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Load Packages 
+
+```{r load packages}
+# Load the necessary libraries
+library(rvest)
+library(dplyr)
+library(purrr)
+library(httr)
+library(openxlsx)
+```
+
+
+# Scrape info-pages of local health authorities
+
+```{r define function to scrape info pages}
+# Define a function to scrape the health office link for a given postal code, with a custom User-Agent header
+scrape_health_office <- function(plz) {
+  # Construct the URL based on the postal code
+  url <- paste0("https://www.gesundheitsamt.in/plz/", plz, "/")
+  
+  user_agent <- "Mozilla/5.0 (compatible; polite-scraping-bot/1.0)"
+  
+  # Attempt to read the page and extract the first strong element
+  tryCatch({
+    # Pause between requests to avoid overloading the server (politeness)
+    Sys.sleep(runif(1, 1, 1.5))  # Sleep for 1 to 1.5 seconds randomly
+    
+    # Send GET request with custom User-Agent header
+    response <- GET(url, user_agent(user_agent))
+    
+    # Check if the request was successful
+    if (status_code(response) != 200) {
+      return(NA)  # Return NA if there is a problem with the request
+    }
+    
+    # Parse the webpage content
+    page <- read_html(response)
+    
+    # Extract the link from the first <strong> element within the 'maincontent' container
+    health_office_link <- page %>%
+      html_node(".maincontent strong a") %>%  # Select the first <a> tag within <strong>
+      html_attr("href")                       # Extract the href attribute
+    
+    # Return the full link by appending the base URL
+    full_link <- paste0("https://www.gesundheitsamt.in", health_office_link)
+    
+    # Return the full link
+    return(full_link)
+    
+  }, error = function(e) {
+    # Return NA if an error occurs (e.g., the page doesn't exist or structure is different)
+    return(NA)
+  })
+}
+```
+
+```{r scrape info pages}
+# Scrape the health office links for each postal code in the dataframe
+df_hospital_closures_combined <- df_hospital_closures_combined %>%
+  mutate(health_office_link = map_chr(Postleitzahl, scrape_health_office))
+
+# Display the updated dataframe with the health office links
+print(df_hospital_closures_combined)
+```
+
+```{r after inspection, manually correct invalid links for individual departments}
+df_hospital_closures_combined <- df_hospital_closures_combined %>%
+  mutate(health_office_link = case_when(
+    Postleitzahl == "6493" ~ "https://www.gesundheitsamt.in/amt/154/",
+    Postleitzahl == "8468" ~ "https://www.gesundheitsamt.in/amt/30/",
+    Postleitzahl == "92311" ~ "https://www.gesundheitsamt.in/amt/348/",
+    Postleitzahl == "6846" ~ "https://www.gesundheitsamt.in/amt/21/",
+    Postleitzahl == "47167" ~ "https://www.gesundheitsamt.in/amt/178/",
+    Postleitzahl == "24943" ~ "https://www.gesundheitsamt.in/amt/89/",
+    Postleitzahl == "31737" ~ "https://www.gesundheitsamt.in/amt/122/",
+    Postleitzahl == "27404" ~ "https://www.gesundheitsamt.in/amt/105/",
+    Postleitzahl == "23845" ~ "https://www.gesundheitsamt.in/amt/82/",
+    TRUE ~ health_office_link  # Keep original link if no correction is specified
+  ))
+```
+
+
+
+# Scrape email addresses of local health authorities
+
+```{r define function to scrape email addresses}
+# Define a function to scrape the email address from the health office's detail page
+scrape_health_office_email <- function(office_url) {
+  user_agent <- "Mozilla/5.0 (compatible; polite-scraping-bot/1.0)"
+  
+  # Attempt to read the page and extract the email address
+  tryCatch({
+    # Pause between requests to avoid overloading the server (politeness)
+    Sys.sleep(runif(1, 1, 1.5))  # Sleep for 1 to 1.5 seconds randomly
+    
+    # Send GET request with custom User-Agent header
+    response <- GET(office_url, user_agent(user_agent))
+    
+    # Check if the request was successful
+    if (status_code(response) != 200) {
+      return(NA)  # Return NA if there is a problem with the request
+    }
+    
+    # Parse the webpage content
+    page <- read_html(response)
+    
+    # Extract the email address from the table row that contains 'E-Mail'
+    email <- page %>%
+      html_node(xpath = "//tr[td[text()='E-Mail']]/td/a") %>%  # Select the <a> tag that contains the email address
+      html_attr("href")                                        # Extract the href attribute (which contains 'mailto:email')
+    
+    # If the email is found, clean it by removing 'mailto:'
+    if (!is.na(email)) {
+      email <- sub("^mailto:", "", email)
+    }
+    
+    # Return the email address
+    return(email)
+    
+  }, error = function(e) {
+    # Return NA if an error occurs
+    return(NA)
+  })
+}
+```
+
+```{r scrape email addresses}
+# Scrape the health office links for each postal code in the dataframe
+df_hospital_closures_combined <- df_hospital_closures_combined %>%
+  mutate(email = map_chr(health_office_link, scrape_health_office_email))
+
+# Display the updated dataframe with the health office links
+print(df_hospital_closures_combined)
+```
+
+# adding article for respective institution
+
+```{r}
+# Create a reference table with institution types and their grammatical articles
+article_table <- data.frame(
+  Institution_Type  = c("Klinikum", "Krankenhaus", "Gesundheitszentrum", "zentrum", "Universitätsklinik", "Hospital", "ospital", "Spital", "Klinik", "klinik", "krankenhaus", "KRANKENHAUS", "KLINIKUM"),
+  Article  = c("das", "das", "das","das", "die", "das", "das", "das", "die", "die", "das", "das", "das"),
+  stringsAsFactors = FALSE
+)
+
+# Function to find the first matching article for an institution
+find_article <- function(name) {
+  # Loop through the article_table and find the first match
+  for (i in 1:nrow(article_table)) {
+    if (grepl(article_table$Institution_Type[i], name)) {
+      # Return the first matching article
+      return(article_table$Article[i])
+    }
+  }
+  # Default return if no match is found
+  return("die medizinische Einrichtung")
+}
+
+# Apply the function to assign articles for each institution in the dataframe
+df_hospital_closures_combined$Article <- sapply(df_hospital_closures_combined$Name, find_article)
+
+# Move the Article column to the first position
+df_hospital_closures_combined <- df_hospital_closures_combined[, c("Article", setdiff(names(df_hospital_closures_combined), "Article"))]
+
+# Display the dataframe with assigned articles
+print(df_hospital_closures_combined)
+```
+
+```{r subsets for health departments with more single or multiple closures}
+# Create a count of closed clinics per health department
+df_clinics_count <- df_hospital_closures_combined %>%
+  mutate(Postleitzahl = ifelse(nchar(Postleitzahl) == 4, paste0("0", Postleitzahl), Postleitzahl)) %>%
+  group_by(health_office_link) %>%
+  mutate(clinic_count = n()) %>%  # Adds a new column 'clinic_count' with the count of clinics per department
+  ungroup()
+
+# Subset for health departments with more than one closed clinic
+df_multiple_clinics <- df_clinics_count %>%
+  filter(clinic_count > 1)
+
+# Subset for health departments with only one closed clinic
+df_single_clinic <- df_clinics_count %>%
+  filter(clinic_count == 1)
+
+# Optional: Remove the 'clinic_count' column if it’s no longer needed
+df_multiple_clinics <- df_multiple_clinics %>% select(-clinic_count)
+df_single_clinic <- df_single_clinic %>% select(-clinic_count)
+
+# Display results
+print("Health departments with more than one closed clinic:")
+print(df_multiple_clinics)
+
+print("Health departments with only one closed clinic:")
+print(df_single_clinic)
+
+```
+
+```{r}
+# Define the path and file name for the Excel file
+file_path <- "df_single_clinic.xlsx"
+
+# Export the dataframe to Excel
+write.xlsx(df_single_clinic, file = file_path)
+
+# Print a message to confirm
+cat("Dataframe exported to", file_path)
+```
+
+

@@ -1,0 +1,168 @@
+---
+title: "Import and Prepare Geospatial and Regional Typology Data"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Setup, Load and Prepare Regiostar Data
+
+```{r load_regiostar_data}
+# Define path to RegioStaR classification file
+path_regiostar <- here::here("data", "raw", "geo_data", "2023 RegioStaR-Referenzdateien.xlsx")
+
+# List available sheets for verification
+sheets_regiostar <- readxl::excel_sheets(path_regiostar)
+print(sheets_regiostar)
+
+# Load RegioStaR data with all columns as character
+df_regiostar_raw <- readxl::read_excel(path_regiostar, sheet = "ReferenzGebietsstand2023", col_types = "text")
+
+# Clean and extend dataset with collapsed category levels
+df_regiostar_clean <- df_regiostar_raw %>%
+  dplyr::mutate(
+    RegioStaR4from5 = dplyr::case_when(
+      RegioStaR5 %in% c("51", "52") ~ "51/52",
+      RegioStaR5 == "53" ~ "53",
+      RegioStaR5 == "54" ~ "54",
+      RegioStaR5 == "55" ~ "55"
+    ),
+    RegioStaR6from7 = dplyr::case_when(
+      RegioStaR7 %in% c("71", "72") ~ "71/72",
+      RegioStaR7 == "73" ~ "73",
+      RegioStaR7 == "74" ~ "74",
+      RegioStaR7 == "75" ~ "75",
+      RegioStaR7 == "76" ~ "76",
+      RegioStaR7 == "77" ~ "77"
+    )
+  ) %>%
+  dplyr::mutate(
+    RegioStaR4from5 = factor(RegioStaR4from5, levels = c("51/52", "53", "54", "55"))
+  )
+
+# Check resulting columns
+colnames(df_regiostar_clean)
+```
+
+# 2. Load and Prepare Shapefiles
+
+```{r load_eurostat_nuts_shapefiles}
+# Retrieve NUTS geospatial layers for Germany using eurostat package
+shp_nuts_3 <- eurostat::get_eurostat_geospatial(resolution = 10, nuts_level = 3) %>%
+  dplyr::filter(CNTR_CODE == "DE")
+
+shp_nuts_2 <- eurostat::get_eurostat_geospatial(resolution = 10, nuts_level = 2) %>%
+  dplyr::filter(CNTR_CODE == "DE")
+
+shp_nuts_1 <- eurostat::get_eurostat_geospatial(resolution = 10, nuts_level = 1) %>%
+  dplyr::filter(CNTR_CODE == "DE")
+```
+
+```{r load_zensus_shapefiles}
+# Define shapefile paths 
+path_shp_gemeinde <- here::here("data", "raw", "geo_data", "Shapefiles", "Shapefile_Zensus2022", "EPSG_25832", "VG250_GEM.shp")
+
+# Load shapefiles
+shp_gemeinde <- sf::st_read(path_shp_gemeinde, quiet = TRUE)
+
+# Reproject to WGS 84 for mapping
+shp_gemeinde <- sf::st_transform(shp_gemeinde, crs = 4326)
+```
+
+# 3. Combine RegioStaR Classification with Shapefiles
+
+```{r merge_regiostar_with_shapefile}
+# Harmonize ARS codes (municipality IDs) for merging
+df_regiostar_complete <- df_regiostar_clean %>%
+  dplyr::mutate(ARS = stringr::str_pad(as.character(gemrs_23), width = 12, pad = "0"))
+
+shp_gemeinde <- shp_gemeinde %>%
+  dplyr::mutate(ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0"))
+
+# Join RegioStaR classification with municipality geometries
+df_regiostar_geo <- dplyr::left_join(
+  df_regiostar_complete,
+  dplyr::select(shp_gemeinde, ARS, geometry),
+  by = "ARS"
+) %>%
+  sf::st_as_sf() %>%
+  rmapshaper::ms_simplify(
+  ., 
+  keep = 0.05,
+  keep_shapes = TRUE
+)
+```
+
+```{r create_state_geometry_from_municipalities}
+# Generate state-level geometries by grouping municipalities (GEM) into Bundesländer
+df_states_geo <- df_regiostar_geo %>%
+  dplyr::mutate(
+    gem_23 = stringr::str_pad(as.character(gem_23), width = 8, side = "left", pad = "0"),  # Standardize ID length
+    state_id = substr(gem_23, 1, 2)  # Extract first two digits as state ID
+  ) %>%
+  dplyr::group_by(state_id) %>%
+  dplyr::group_split() %>%
+  purrr::map_df(~ {
+    geom_union <- sf::st_union(sf::st_make_valid(.x$geometry))  # Merge all geometries within state
+    tibble::tibble(state_id = unique(.x$state_id), geometry = geom_union)
+  }) %>%
+  sf::st_as_sf()
+
+# Ensure valid geometry and project into metric CRS (ETRS89 / UTM 32N)
+df_states_geo_clean <- df_states_geo %>%
+  sf::st_make_valid() %>%
+  sf::st_transform(25832)
+
+# Simplify geometry to reduce detail and size
+df_states_geo_simplified <- rmapshaper::ms_simplify(df_states_geo_clean, keep = 0.05, keep_shapes = TRUE)
+
+# Extract shared internal boundaries between states
+df_internal_borders <- rmapshaper::ms_innerlines(df_states_geo_simplified)
+```
+
+
+```{r derive_clean_outer_border}
+# Load full geometry for Germany (without gaps for missing municipalities) and reproject to match other data
+germany_outline <- rnaturalearth::ne_countries(country = "Germany", returnclass = "sf") %>%
+  sf::st_transform(25832)
+
+# Create buffer inward (negative) to remove irregularities along the edge
+germany_shrink <- sf::st_buffer(germany_outline, -20000)
+
+# Merge all state geometries into single national geometry
+states_union <- df_states_geo %>%
+  sf::st_transform(25832) %>%
+  sf::st_make_valid() %>%
+  sf::st_union()
+
+# Intersect with shrunk boundary to derive a clean outer national shape
+states_border_clean <- sf::st_union(states_union, germany_shrink)
+states_border_clean_sf <- sf::st_as_sf(states_border_clean)
+```
+
+
+```{r}
+ggplot() +
+  geom_sf(data = df_internal_borders, color = "gray40", size = 0.3) +  # Internal borders
+  geom_sf(data = states_border_clean_sf, fill = NA, color = "black", size = 0.5) +  # National border
+  coord_sf(crs = 25832) +
+  theme_minimal() +
+  labs(title = "Federal and State Borders (Simplified)", subtitle = "Germany - RegioStaR Shapes")
+```
+
+```{r}
+# Define output directory for processed geodata
+fs::dir_create(here::here("data", "processed", "geodata"))
+
+# Export as GeoPackage (great for storing multiple layers and preserving geometry)
+sf::st_write(df_regiostar_geo, here::here("data", "processed", "geodata", "df_regiostar_geo.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_states_geo, here::here("data", "processed", "geodata", "df_states_geo.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_states_geo_simplified, here::here("data", "processed", "geodata", "df_states_geo_simplified.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_internal_borders, here::here("data", "processed", "geodata", "df_internal_borders.gpkg"), delete_dsn = TRUE)
+sf::st_write(states_border_clean_sf, here::here("data", "processed", "geodata", "states_border_clean_sf.gpkg"), delete_dsn = TRUE)
+
+```
+
+
