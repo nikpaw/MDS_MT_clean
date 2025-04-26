@@ -1,0 +1,649 @@
+---
+title: "03_3_TBA"
+output: html_document
+---
+
+
+### Robustness Tests: Placebo Tests
+
+```{r}
+set.seed(123)  # For reproducibility
+
+# Step 1: Keep only never-treated units
+df_control_only <- df_CS_model_preparation %>%
+  filter(year_of_closure == 0)
+
+# Step 2: Randomly select a subset of control units for pseudo-treatment
+pseudo_treated_ids <- df_control_only %>%
+  distinct(ARS) %>%
+  slice_sample(prop = 0.1)  # Randomly select 10% of units
+
+# Step 3: Assign random treatment years (2010–2020)
+pseudo_treatment_years <- pseudo_treated_ids %>%
+  mutate(pseudo_treatment_year = sample(2010:2020, n(), replace = TRUE))
+
+# Step 4: Merge random years back into control sample
+df_placebo_random_years <- df_control_only %>%
+  left_join(pseudo_treatment_years, by = "ARS") %>%
+  mutate(
+    year_of_closure_placebo = if_else(is.na(pseudo_treatment_year), 0, pseudo_treatment_year)
+  )
+
+# Step 5: Estimate placebo ATT
+att_placebo_random_years <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure_placebo",
+  data = df_placebo_random_years,
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 6: Aggregate dynamic ATT
+agg_placebo_random_years <- aggte(
+  att_placebo_random_years,
+  type = "dynamic",
+  min_e = -10,
+  max_e = 8,
+  bstrap = TRUE
+)
+
+# Summary of placebo
+summary(agg_placebo_random_years)
+
+# Optional plot
+# ggdid(agg_placebo_random_years)
+
+```
+
+```{r}
+# Step 1: Subset to relevant units
+df_placebo_pre2015 <- df_CS_model_preparation %>%
+  filter(
+    treatment_status_spillover == "control" |
+    (treatment_status_spillover == "direct_treated" & year_of_closure >= 2016)
+  ) %>%
+  mutate(
+    year_of_closure_placebo = if_else(treatment_status_spillover == "direct_treated", 2011, 0)
+  ) %>%
+  filter(Year <= 2015)  # Keep only pre-2015
+
+# Optional check
+table(df_placebo_pre2015$year_of_closure_placebo)
+
+# Step 2: Estimate placebo ATT
+att_placebo_pre2015 <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure_placebo",
+  data = df_placebo_pre2015,
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 3: Aggregate placebo dynamic ATT
+att_placebo_pre2015_dynamic <- aggte(
+  att_placebo_pre2015,
+  type = "dynamic",
+  na.rm = TRUE,
+  bstrap = TRUE
+)
+
+# Step 4: Summary
+summary(att_placebo_pre2015_dynamic)
+
+# Optional plot
+# ggdid(att_placebo_pre2015_dynamic)
+
+```
+
+
+```{r}
+# Random timing placebo
+df_placebo_random <- broom::tidy(agg_placebo_random_years) %>%
+  mutate(
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment")),
+    model = "Random Placebo Timing"
+  )
+
+# Fixed 2011 placebo
+df_placebo_2011 <- broom::tidy(att_placebo_pre2015_dynamic) %>%
+  mutate(
+    period = factor(ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+                    levels = c("Pre-Treatment", "Post-Treatment")),
+    model = "Placebo Closure Year = 2011"
+  )
+
+# Combine
+df_placebo_combined <- bind_rows(df_placebo_random, df_placebo_2011)
+
+```
+
+```{r}
+plot_placebo_facet <- ggplot(df_placebo_combined, aes(x = event.time, y = estimate, color = period)) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.3, linewidth = 1.2) +
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+  facet_wrap(~ model, nrow = 1, scales = "free_x") +
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Placebo Treatment", "After Placebo Treatment")
+  ) +
+  labs(
+    title = NULL,
+    x = "Years Relative to Placebo Treatment",
+    y = "Estimated ATT (with 95% CI)"
+  ) +
+  scale_y_continuous(
+    limits = c(-2, 2),
+    breaks = seq(-2, 2, by = 0.5),
+    minor_breaks = seq(-2, 2, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")
+  )
+
+plot_placebo_facet
+
+# Commented out: Saving the plot
+# ggsave("images/plot_placebo_facet.png",
+#        width = 12, height = 5, dpi = 300)
+
+```
+
+
+
+
+### Robustness Tests: Subgroup Analyses
+
+#### 2-Type Municipality Typology (Urban vs Rural Regions)
+```{r}
+# Step 1: Estimate ATT separately for each RegioStaR2 group
+att_results_by_group_2 <- list()
+
+for (muni_type in unique(df_CS_model_preparation$RegioStaR2)) {
+  
+  # Subset data for municipality type
+  df_subset <- df_CS_model_preparation %>%
+    dplyr::filter(RegioStaR2 == muni_type, year_of_closure < 2021)
+  
+  # Estimate ATT
+  att_model <- did::att_gt(
+    yname = "employment_level",
+    tname = "Year",
+    idname = "ARS",
+    gname = "year_of_closure",
+    data = df_subset,
+    xformla = ~ RegioStaR6from7,
+    control_group = "nevertreated",
+    anticipation = 0
+  )
+  
+  # Compute dynamic and simple overall effects
+  att_dynamic <- did::aggte(
+    att_model, 
+    type = "dynamic",
+    max_e = 8,
+    bstrap = TRUE,
+    na.rm = TRUE
+  )
+  
+  att_simple <- did::aggte(
+    att_model,
+    type = "simple",
+    bstrap = TRUE,
+    na.rm = TRUE
+  )
+  
+  # Save results
+  att_results_by_group_2[[muni_type]] <- list(
+    att_model = att_model,
+    dynamic_effect = att_dynamic,
+    simple_effect = att_simple
+  )
+}
+
+# Step 2: Collect dynamic ATT results across groups
+all_dynamic_results_by_group_2 <- purrr::map_df(names(att_results_by_group_2), function(muni_type) {
+  broom::tidy(att_results_by_group_2[[muni_type]]$dynamic_effect) %>%
+    dplyr::mutate(
+      municipality_type = muni_type,
+      time_periods = event.time,
+      period = factor(
+        dplyr::if_else(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+        levels = c("Pre-Treatment", "Post-Treatment")
+      )
+    )
+}) %>%
+  dplyr::mutate(
+    municipality_type = dplyr::recode(municipality_type,
+      "1" = "Urban Region",
+      "2" = "Rural Region"
+    )
+  )
+
+# Step 3: Collect simple ATT results across groups
+overall_treatment_effects_by_group_2 <- purrr::map_df(names(att_results_by_group_2), function(muni_type) {
+  broom::tidy(att_results_by_group_2[[muni_type]]$simple_effect) %>%
+    dplyr::mutate(municipality_type = muni_type)
+}) %>%
+  dplyr::rename(
+    att_estimate = estimate,
+    att_se = std.error,
+    ci_lower = conf.low,
+    ci_upper = conf.high
+  ) %>%
+  dplyr::select(municipality_type, att_estimate, att_se, ci_lower, ci_upper) %>%
+  dplyr::mutate(
+    municipality_type = dplyr::recode(municipality_type,
+      "1" = "Urban Region",
+      "2" = "Rural Region"
+    )
+  )
+
+# Display simple treatment effects
+overall_treatment_effects_by_group_2
+
+```
+
+
+```{r}
+### Dynamic ATT Plot by Municipality Type
+
+# Step 4: Prepare for plotting
+all_dynamic_results_by_group_2 <- all_dynamic_results_by_group_2 %>%
+  dplyr::mutate(
+    group_period = dplyr::case_when(
+      municipality_type == "Urban Region" & period == "Pre-Treatment" ~ "Urban Region - Pre",
+      municipality_type == "Urban Region" & period == "Post-Treatment" ~ "Urban Region - Post",
+      municipality_type == "Rural Region" & period == "Pre-Treatment" ~ "Rural Region - Pre",
+      municipality_type == "Rural Region" & period == "Post-Treatment" ~ "Rural Region - Post"
+    )
+  )
+
+# Define custom color palette
+custom_colors <- c(
+  "Urban Region - Pre" = colorspace::lighten("#6A3D9A", amount = 0.25),  # Lighter purple
+  "Urban Region - Post" = "#6A3D9A",                                     # Darker purple
+  "Rural Region - Pre" = colorspace::lighten("#B15928", amount = 0.25),   # Lighter brown
+  "Rural Region - Post" = "#B15928"                                      # Darker brown
+)
+
+# Step 5: Plot dynamic ATT by municipality type
+plot_dynamic_ATT_combined <- ggplot2::ggplot(all_dynamic_results_by_group_2, 
+                                  ggplot2::aes(x = time_periods, y = estimate, color = group_period)) +
+  
+  ggplot2::geom_point(size = 3, position = ggplot2::position_dodge(width = 0.5)) +
+  
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = conf.low, ymax = conf.high),
+    width = 0.5,
+    position = ggplot2::position_dodge(width = 0.5),
+    linewidth = 1.3
+  ) +
+  
+  ggplot2::geom_hline(yintercept = 0, color = "black") +
+  ggplot2::geom_vline(xintercept = 0, color = "black", linetype = "dashed", alpha = 0.2) +
+  
+  ggplot2::scale_color_manual(
+    values = custom_colors,
+    breaks = c("Urban Region - Post", "Rural Region - Post"),
+    labels = c("Urban Region", "Rural Region"),
+    name = "Municipality Type\n(Lighter Shades = Pre-Treatment)"
+  ) +
+  
+  ggplot2::labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  
+  ggplot2::scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  
+  ggplot2::scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+
+# Display the plot
+plot_dynamic_ATT_combined
+
+```
+
+
+
+
+##Robustness Tests: Allowing for Anticipation Effect
+
+```{r}
+# Step 1: Estimate ATT allowing for 1-year anticipation
+CS_anticipation_results <- att_gt(
+  yname = "employment_level",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure",
+  data = df_CS_model_preparation %>%
+    dplyr::filter(year_of_closure < 2021),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 1
+)
+
+# Step 2: Compute dynamic ATT
+CS_anticipation_dynamic_effect <- aggte(
+  CS_anticipation_results,
+  type = "dynamic",
+  max_e = 8,
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Compute simple overall ATT
+CS_anticipation_simple_effect <- aggte(
+  CS_anticipation_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Tidy dynamic results
+CS_anticipation_dynamic_data <- broom::tidy(CS_anticipation_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 5: Store all results
+CS_anticipation_results_combined <- list(
+  att_model = CS_anticipation_results,
+  dynamic_effect = CS_anticipation_dynamic_effect,
+  simple_effect = CS_anticipation_simple_effect
+)
+
+# Optional: Display summary
+CS_anticipation_simple_effect
+CS_anticipation_dynamic_data
+
+```
+
+```{r}
+# --- Default DR Model (no anticipation) ---
+model_no_anticipation_df <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(model = "Without Anticipation (Default)")
+
+# --- DR Model allowing anticipation ---
+model_anticipation_1_df <- broom::tidy(CS_anticipation_dynamic_effect) %>%
+  mutate(model = "Allowing 1-Year Anticipation")
+
+# --- Combine both models ---
+df_combined_models_test_anticipation <- bind_rows(
+  model_no_anticipation_df,
+  model_anticipation_1_df
+) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = factor(
+      model,
+      levels = c("Without Anticipation (Default)", "Allowing 1-Year Anticipation")
+    )
+  )
+
+```
+
+```{r}
+plot_dynamic_ATT_anticipation <- ggplot(df_combined_models_test_anticipation, 
+                                        aes(x = event.time, y = estimate, color = period)) +
+  
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(
+    aes(ymin = conf.low, ymax = conf.high),
+    width = 0.4,
+    position = position_dodge(width = 0.5),
+    linewidth = 1.2
+  ) +
+
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  facet_wrap(~ model, nrow = 1) +
+
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")
+  )
+
+plot_dynamic_ATT_anticipation
+
+# Commented out saving the plot
+# ggsave("images/plot_dynamic_ATT_anticipation.png",
+#        width = 12, height = 5, dpi = 300)
+
+```
+
+
+
+
+### Robustness Test: Including vs Excluding Spillover Units
+
+```{r}
+# Step 1: Prepare the robustness dataset (including spillover units)
+df_CS_model_preparation_robustness_spillover <- df_combined_hospital_data_employment_enriched %>%
+  filter(
+    treatment_status_spillover %in% c("control", "direct_treated", "spillover")
+  ) %>%
+  mutate(
+    ARS = as.numeric(ARS),
+    year_of_closure = as.numeric(as.character(year_of_closure)),
+    year_of_closure = ifelse(is.na(year_of_closure), 0, year_of_closure)
+  )
+
+```
+
+```{r}
+# Step 2: Estimate ATT using att_gt (with spillover units)
+CS_baseline_spillover_results <- att_gt(
+  yname = "employment_level",              
+  tname = "Year",                          
+  idname = "ARS",                          
+  gname = "year_of_closure",               
+  data = df_CS_model_preparation_robustness_spillover %>%
+    filter(year_of_closure < 2021),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 3: Compute dynamic ATT
+CS_baseline_spillover_dynamic_effect <- aggte(
+  CS_baseline_spillover_results,
+  type = "dynamic",
+  max_e = 8,
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 4: Compute simple overall ATT
+CS_baseline_spillover_simple_effect <- aggte(
+  CS_baseline_spillover_results,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 5: Tidy dynamic results for plotting
+CS_baseline_spillover_dynamic_data <- broom::tidy(CS_baseline_spillover_dynamic_effect) %>%
+  mutate(
+    time_periods = event.time,
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Step 6: Store all results
+CS_baseline_spillover_results_combined <- list(
+  att_model = CS_baseline_spillover_results,
+  dynamic_effect = CS_baseline_spillover_dynamic_effect,
+  simple_effect = CS_baseline_spillover_simple_effect
+)
+
+# Optional: Display results
+CS_baseline_spillover_simple_effect
+CS_baseline_spillover_dynamic_data
+
+```
+
+```{r}
+# Step 1: Tidy and label the model results
+spillover_excluded_df <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  mutate(model = "Spillover Units Excluded")
+
+spillover_included_df <- broom::tidy(CS_baseline_spillover_dynamic_effect) %>%
+  mutate(model = "Spillover Units Included")
+
+# Step 2: Combine results
+df_combined_models_test_spillover <- bind_rows(
+  spillover_excluded_df,
+  spillover_included_df
+) %>%
+  mutate(
+    period = factor(
+      ifelse(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    ),
+    model = factor(model, levels = c("Spillover Units Excluded", "Spillover Units Included"))
+  )
+
+```
+
+```{r}
+plot_spillover_comparison <- ggplot(df_combined_models_test_spillover, 
+                                    aes(x = event.time, y = estimate, color = period)) +
+
+  geom_point(size = 3, position = position_dodge(width = 0.5)) +
+  geom_errorbar(
+    aes(ymin = conf.low, ymax = conf.high),
+    width = 0.4,
+    position = position_dodge(width = 0.5),
+    linewidth = 1.2
+  ) +
+
+  geom_hline(yintercept = 0, color = "black") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+
+  facet_wrap(~ model, nrow = 1) +
+
+  scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#D9AF6B",
+      "Post-Treatment" = "#855C75"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+
+  labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+
+  scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+
+  scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),
+    legend.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    strip.text = element_text(size = 16, face = "bold")
+  )
+
+# Display the plot
+plot_spillover_comparison
+
+# Saving is commented out for now
+# ggsave("images/plot_spillover_comparison.png",
+#        width = 12, height = 5, dpi = 300)
+
+```
+

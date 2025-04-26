@@ -1,0 +1,844 @@
+---
+title: "Merging Datasets and Preparing Sample for Estimation"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load, Merge and Process Datasets I
+```{r load_processed_khv_data}
+# Define processing function
+process_khv_dataframe <- function(df) {
+  if ("PLZ" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = as.character(PLZ))
+  } else if ("Adresse_Postleitzahl_Standort" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = as.character(Adresse_Postleitzahl_Standort))
+  } else if ("Adresse _Zustellbezogene Postleitzahl und Ort" %in% colnames(df)) {
+    df <- dplyr::mutate(df, Postleitzahl = stringr::str_extract(`Adresse _Zustellbezogene Postleitzahl und Ort`, "\\d{5}"))
+  } else {
+    df <- dplyr::mutate(df, Postleitzahl = NA_character_)
+  }
+  
+  if ("EinrichtungsTyp" %in% colnames(df)) {
+    df <- dplyr::filter(df, EinrichtungsTyp == 2)
+  } else if ("Art" %in% colnames(df)) {
+    df <- dplyr::filter(df, Art == 2)
+  }
+
+  return(df)
+}
+
+# Process all KHV geocoded datasets
+processed_khv_list <- purrr::map(list_khv_geocoded, process_khv_dataframe)
+```
+
+```{r match_closures_khv}
+# Match closure postal codes to KHV data
+
+df_hospital_closures_combined_geocoded_continue_match_KHV <- df_hospital_closures_info_combined %>%
+  dplyr::mutate(
+    match_found = purrr::map_lgl(Postleitzahl, function(plz) {
+      any(purrr::map_lgl(processed_khv_list, function(df) plz %in% df$Postleitzahl))
+    }),
+    matching_dfs = purrr::map_chr(Postleitzahl, function(plz) {
+      matched <- purrr::imap_chr(processed_khv_list, function(df, name) {
+        if (plz %in% df$Postleitzahl) name else NA_character_
+      })
+      paste(na.omit(matched), collapse = "; ")
+    })
+  )
+```
+
+```{r import_manual_match_data}
+# Read manually confirmed last matches file
+file_path_manual_match <- here::here("data", "supplementary_files", "hospital_closures_match_khv_register_plankrankenhaus.txt")
+
+lines_manual_match <- readLines(file_path_manual_match)
+
+# Parse lines into dataframe
+df_hospital_closures_last_match_khv_plankrankenhaus <- tibble::tibble(
+  Postleitzahl = stringr::str_extract(lines_manual_match, "^[0-9]+"),
+  info_last_match_khv = stringr::str_trim(stringr::str_remove(lines_manual_match, "^[0-9]+\\s+"))
+) %>%
+  dplyr::mutate(
+    year_last_match_khv_confirmed = as.integer(stringr::str_extract(info_last_match_khv, "\\d{4}"))
+  )
+```
+
+```{r merge_manual_with_closures}
+# Merge manually confirmed matches with closures
+
+df_hospital_closures_combined_geocoded_continue_match_KHV_updated <- df_hospital_closures_combined_geocoded_continue_match_KHV %>%
+  dplyr::left_join(
+    df_hospital_closures_last_match_khv_plankrankenhaus %>%
+      dplyr::select(Postleitzahl, info_last_match_khv, year_last_match_khv_confirmed),
+    by = "Postleitzahl",
+    multiple = "any"
+  )
+```
+
+# Confirmed Hospital Closures and Excluded Cases
+
+```{r filter_confirmed_excluded_closures}
+df_confirmed_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  dplyr::filter(!is.na(year_last_match_khv_confirmed) & !is.na(year_of_closure))
+
+df_excluded_closures <- df_hospital_closures_combined_geocoded_continue_match_KHV_updated %>%
+  dplyr::filter(!is.na(year_last_match_khv_confirmed) & is.na(year_of_closure))
+
+# Print counts
+cat("Confirmed closures:", nrow(df_confirmed_closures), "\n")
+cat("Excluded closures (uncertain closure year):", nrow(df_excluded_closures), "\n")
+
+# Define study years
+years_own_study <- 2010:2020
+```
+
+```{r match_hospitals_municipalities}
+# Convert hospital locations to sf object
+hospitals_sf <- sf::st_as_sf(
+  df_hospital_location_merged_geocoded,
+  coords = c("longitude", "latitude"),
+  crs = 4326
+)
+
+# Transform CRS to match municipality shapefile
+hospitals_sf_transformed <- sf::st_transform(
+  hospitals_sf,
+  sf::st_crs(shp_gemeinde)
+)
+
+# Spatial join hospitals with municipalities
+hospitals_with_gemeinde <- sf::st_join(
+  hospitals_sf_transformed,
+  shp_gemeinde,
+  join = sf::st_intersects
+)
+
+# Transform hospitals back to WGS 84 (optional)
+hospitals_with_gemeinde <- sf::st_transform(
+  hospitals_with_gemeinde,
+  4326
+)
+
+# Extract coordinates and select relevant columns
+hospitals_with_gemeinde <- hospitals_with_gemeinde %>%
+  dplyr::mutate(
+    longitude = sf::st_coordinates(.)[, 1],
+    latitude = sf::st_coordinates(.)[, 2]
+  ) %>%
+  dplyr::select(
+    Name,
+    IK_Institutionskennzeichen,
+    Standortnummer,
+    Standortnummer_alt,
+    year,
+    Adresse,
+    longitude,
+    latitude,
+    ARS
+  )
+
+# Convert to regular data frame
+df_hospitals_with_gemeinde <- as.data.frame(hospitals_with_gemeinde)
+```
+
+```{r }
+df_excluded_closures_ARS <- df_excluded_closures %>%
+  dplyr::mutate(IK_Institutionskennzeichen = as.character(IK_Institutionskennzeichen)) %>%
+  dplyr::left_join(
+    df_hospitals_with_gemeinde %>%
+      dplyr::mutate(IK_Institutionskennzeichen = as.character(IK_Institutionskennzeichen)) %>%
+      dplyr::select(
+        IK_Institutionskennzeichen,
+        Standortnummer,
+        year,
+        ARS
+      ),
+    by = c("IK_Institutionskennzeichen", "Standortnummer", "year"),
+    multiple = "any"
+  )
+
+```
+
+```{r visualize_confirmed_closures}
+# Define the years covered in each study and statistics
+all_years_of_data <- 2003:2023
+years_preusker <- 2003:2013
+
+# Extract number of confirmed closures from own research (convert to numeric and ensure all years are covered)
+own_research_closures <- table(df_confirmed_closures$year_of_closure) * -1
+
+# Convert to a named numeric vector with all years explicitly included (default missing years to 0)
+own_research_closures_full <- setNames(rep(0, length(all_years_of_data)), all_years_of_data)
+own_research_closures_full[names(own_research_closures)] <- own_research_closures
+
+# Official hospital numbers (2002-2023)
+official_hospital_numbers <- c(
+  2221, 2197, 2166, 2139, 2104, 2087, 2083, 2084, 2064, 2045, 2017, 1996, 
+  1980, 1956, 1951, 1942, 1925, 1914, 1903, 1887, 1893, 1874
+)
+
+# Compute annual net change in the number of hospitals (official statistics)
+official_hospital_numbers_annual_change <- diff(official_hospital_numbers)
+
+# Define confirmed closures as per Preusker et al.
+preusker_closures <- c(
+  -12, -10, -4, -7, -8, -1, -5, -4, -7, -10, -6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+)
+
+# Create dataframe with years 2003-2023
+df_hospital_closure_analysis <- tibble::tibble(
+  Year = all_years_of_data,
+  `Official Net Change` = official_hospital_numbers_annual_change,
+  `Confirmed Closures Preusker (2003–13)` = preusker_closures,
+  `Confirmed Closures Own Research (2010–20)` = as.numeric(own_research_closures_full[as.character(all_years_of_data)])
+)
+
+# Convert dataframe to long format for visualization
+df_hospital_closure_analysis_long <- df_hospital_closure_analysis %>%
+  tidyr::pivot_longer(cols = -Year, names_to = "Statistic", values_to = "Change") %>%
+  tidyr::drop_na()
+
+# Create a histogram to compare all three statistics
+plot_hospital_closures_source_comparison <- ggplot2::ggplot(df_hospital_closure_analysis_long, ggplot2::aes(x = Year, y = Change, fill = Statistic)) +
+  ggplot2::geom_col(position = "dodge", width = 0.7) +
+  ggplot2::theme_minimal() +
+  ggplot2::scale_fill_manual(
+    values = c4a("brewer.dark2", n = 3)
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(-50, 10, by = 5),
+    minor_breaks = NULL
+  ) +
+  ggplot2::scale_x_continuous(
+    limits = c(2002.5, 2020.5),
+    breaks = seq(2003, 2020, by = 1),
+    minor_breaks = NULL
+  ) +
+  ggplot2::labs(
+    title = NULL,
+    x = "Year",
+    y = "Annual Change in Hospital Numbers",
+    fill = NULL
+  ) +
+  ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1)) +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.text = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 14),
+    axis.text = ggplot2::element_text(size = 12)
+  )
+
+# Print plot
+print(plot_hospital_closures_source_comparison)
+
+# Commented out: Save the plot manually later
+# ggplot2::ggsave("images/plot_hospital_closures_confirmed.png", width = 12, height = 5, dpi = 300)
+```
+
+```{r summarize_closure_ratios}
+# Extract relevant subsets from the dataset
+preusker_closures_subset <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_preusker) %>%
+  dplyr::summarise(total_preusker_closures = sum(`Confirmed Closures Preusker (2003–13)`, na.rm = TRUE))
+
+own_closures_subset <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_own_study) %>%
+  dplyr::summarise(total_own_closures = sum(`Confirmed Closures Own Research (2010–20)`, na.rm = TRUE))
+
+# Extract net change in hospital numbers from official statistics
+official_net_change_preusker <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_preusker) %>%
+  dplyr::summarise(total_official_change_preusker = sum(`Official Net Change`, na.rm = TRUE))
+
+official_net_change_own <- df_hospital_closure_analysis %>%
+  dplyr::filter(Year %in% years_own_study) %>%
+  dplyr::summarise(total_official_change_own = sum(`Official Net Change`, na.rm = TRUE))
+
+# Compute the ratios
+ratio_preusker <- preusker_closures_subset$total_preusker_closures / abs(official_net_change_preusker$total_official_change_preusker)
+ratio_own <- own_closures_subset$total_own_closures / abs(official_net_change_own$total_official_change_own)
+
+# Print results
+cat("Ratio of Preusker-confirmed closures to official net change (2003-2013):", round(ratio_preusker, 2), "\n")
+cat("Ratio of own-confirmed closures to official net change (2010-2020):", round(ratio_own, 2), "\n")
+```
+# Load, Merge and Process Datasets II
+
+```{r combine_closures_regiostar_municipalities}
+df_confirmed_closures_ARS <- df_confirmed_closures %>%
+  dplyr::mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen)) %>%
+  dplyr::left_join(
+    df_hospitals_with_gemeinde %>%
+      dplyr::mutate(IK_Institutionskennzeichen = as.factor(IK_Institutionskennzeichen)) %>%
+      dplyr::select(
+        IK_Institutionskennzeichen,
+        Standortnummer,
+        year,
+        ARS
+      ),
+    by = c("IK_Institutionskennzeichen", "Standortnummer", "year")
+  ) %>%
+  dplyr::left_join(
+    df_regiostar_geo %>%
+      dplyr::select(
+        ARS,
+        RegioStaR2,
+        RegioStaR4,
+        RegioStaR4from5,
+        RegioStaR5,
+        RegioStaR6from7,
+        RegioStaR7,
+        RegioStaR17
+      ),
+    by = "ARS"
+  ) %>%
+  dplyr::mutate(ARS = as.factor(ARS))
+
+```
+
+```{r compute_treated_ratios}
+# Define years of interest
+selected_years <- as.character(2009:2019)
+
+# Check distribution in RegioStaR types
+table(df_regiostar_complete$RegioStaR4from5)
+table(df_confirmed_closures_ARS$RegioStaR4from5)
+
+# Count treated hospitals by RegioStaR for selected years
+treated_filtered_counts <- df_confirmed_closures_ARS %>%
+  dplyr::filter(year_of_closure %in% selected_years) %>%
+  dplyr::pull(RegioStaR4from5) %>%
+  table()
+
+# Count all treated hospitals
+treated_counts <- table(df_confirmed_closures_ARS$RegioStaR4from5)
+
+# Count all hospitals (denominator)
+total_counts <- table(df_regiostar_complete$RegioStaR4from5)
+
+# Calculate ratios
+treated_ratio <- treated_counts / total_counts
+treated_ratio_filtered <- treated_filtered_counts / total_counts
+
+# Display
+treated_ratio
+treated_ratio_filtered
+
+```
+# Distribution of Hospita Closures
+```{r plot_municipality_closures}
+# Recode RegioStaR4from5 to descriptive labels
+df_plot_map_hospital_closures_municipality <- df_regiostar_geo %>%
+  dplyr::mutate(
+    RegioStaR4from5 = dplyr::case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region - Metropolis / Large City",
+      RegioStaR4from5 == "53" ~ "Urban Region - Surrounding Area",
+      RegioStaR4from5 == "54" ~ "Rural Region - City or Urban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region - Small-Town Area or Village Area",
+      TRUE ~ RegioStaR4from5
+    )
+  )
+
+# Define the color variable for closure years
+var_color <- "year_of_closure"
+
+# Create the plot
+plot_map_hospital_closures_municipality <- ggplot2::ggplot(data = df_plot_map_hospital_closures_municipality) +
+  ggplot2::geom_sf(ggplot2::aes(color = as.factor(RegioStaR4from5)), color = "black", fill = NA, linewidth = 0.01) +
+  ggplot2::geom_sf(ggplot2::aes(fill = as.factor(RegioStaR4from5)), color = NA, alpha = 0.8) +
+  ggplot2::geom_sf(data = states_border_clean_sf, color = "black", fill = NA, linewidth = 0.5) +
+  ggplot2::geom_sf(data = df_internal_borders, color = "black", fill = NA, linewidth = 0.5) +
+  ggplot2::geom_point(
+    data = df_confirmed_closures %>% dplyr::filter(year_of_closure %in% c("2010", "2011", "2012", "2013", "2014", "2015", "2016", "2017", "2018", "2019", "2020")),
+    ggplot2::aes(x = longitude, y = latitude, fill = .data[[var_color]]),
+    shape = 21, stroke = 0.5, size = 1.75
+  ) +
+  ggplot2::scale_fill_manual(
+    values = c(
+      # "2020" = "#8DD3C7",
+      # "2019" = "#FFFFB3",
+      # "2018" = "#BEBADA",
+      # "2017" = "#FB8072",
+      # "2016" = "#80B1D3",
+      # "2015" = "#FDB462",
+      # "2014" = "#B3DE69",
+      # "2013" = "#FCCDE5",
+      # "2012" = "#D9D9D9",
+      # "2011" = "#BC80BD",
+      # "2010" = "#CCEBC5",
+      
+      "2020" = "darkgrey",
+      "2019" = "orange",
+      "2018" = "purple",
+      "2017" = "yellow",
+      "2016" = "deepskyblue",
+      "2015" = "magenta",
+      "2014" = "chartreuse",
+      "2013" = "darkblue",
+      "2012" = "red",
+      "2011" = "brown",
+      "2010" = "white",
+      
+      "Urban Region - Surrounding Area" = colorspace::lighten("#6A3D9A", amount = 0.8),
+      "Urban Region - Metropolis / Large City" = "#6A3D9A",
+      "Rural Region - Small-Town Area or Village Area" = colorspace::lighten("#B15928", amount = 0.8),
+      "Rural Region - City or Urban Area" = "#B15928"
+    )
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    axis.text = ggplot2::element_blank(),
+    axis.ticks = ggplot2::element_blank(),
+    panel.border = ggplot2::element_blank(),
+    legend.position = "right"
+  ) +
+  ggplot2::labs(
+    title = NULL,
+    fill = "Municipality Type / Year of Hospital Closure",
+    x = NULL,
+    y = NULL
+  )
+
+# Commented out: Save plot manually later
+# ggplot2::ggsave("images/plot_map_hospital_closures_confirmed_municipality_type.pdf",
+#   plot = plot_map_hospital_closures_municipality,
+#   device = cairo_pdf,
+#   width = 8, height = 6
+# )
+
+# Display plot
+plot_map_hospital_closures_municipality
+
+```
+
+```{r prepare_final_did_data}
+# Prepare employment data merged with municipality shapes
+df_dependent_variables_shapes <- df_dependent_variables %>%
+  dplyr::mutate(
+    ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0")  # Ensure ARS codes are 12 digits
+  ) %>%
+  dplyr::inner_join(
+    df_regiostar_geo,
+    by = "ARS"
+  ) %>%
+  dplyr::mutate(
+    hospital_closure = ARS %in% df_confirmed_closures_ARS$ARS
+  )
+
+# Combine hospital closure data with employment variables
+df_combined_hospital_data_employment <- df_confirmed_closures_ARS %>%
+  dplyr::mutate(
+    ARS = stringr::str_pad(as.character(ARS), width = 12, pad = "0")
+  ) %>%
+  dplyr::select(
+    -dplyr::starts_with("Regio")  # Drop RegioStaR columns from closures (will come from municipality data)
+  ) %>%
+  dplyr::right_join(
+    df_dependent_variables_shapes,
+    by = "ARS"
+  ) %>%
+  dplyr::rename(
+    geometry_hospital = geom.x,
+    geometry_municipality = geom.y
+  )
+
+# Check outputs
+head(df_dependent_variables_shapes)
+head(df_combined_hospital_data_employment)
+
+# Optional: Check ARS code lengths
+table(nchar(unique(as.character(df_dependent_variables$ARS))))
+table(nchar(unique(as.character(df_dependent_variables_shapes$ARS))))
+
+```
+
+# Spillover Unit Identification
+```{r create_spillover_indicators}
+df_regiostar_complete_closure_indicated_unclear_defined <- df_regiostar_geo %>%
+  dplyr::mutate(
+    hospital_closure = dplyr::if_else(ARS %in% df_confirmed_closures_ARS$ARS, TRUE, FALSE),
+    unclear_hospital_closure = dplyr::if_else(ARS %in% df_excluded_closures_ARS$ARS, TRUE, FALSE)
+  ) %>%
+  dplyr::mutate(
+    binary_potential_hospital_closure = dplyr::case_when(
+      unclear_hospital_closure ~ TRUE,
+      hospital_closure ~ TRUE,
+      TRUE ~ FALSE
+    ),
+    non_binary_potential_hospital_closure = dplyr::case_when(
+      unclear_hospital_closure ~ "Unclear Treatment Status",
+      hospital_closure ~ "Treated",
+      TRUE ~ "Control"
+    )
+  )
+
+```
+
+
+```{r}
+# Prepare unique municipality dataset
+df_CS_model_preparation_unique <- df_regiostar_complete_closure_indicated_unclear_defined %>%
+  dplyr::distinct(ARS, .keep_all = TRUE) %>%
+  dplyr::filter(!sf::st_is_empty(geom))  # Exclude empty geometries
+
+# Build neighborhood structure (queen contiguity)
+nb_unique <- spdep::poly2nb(df_CS_model_preparation_unique$geom, queen = TRUE)
+
+# Convert neighborhood structure to adjacency matrix
+adjacency_matrix_unique <- spdep::nb2mat(nb_unique, style = "B", zero.policy = TRUE)
+
+# Create treatment and spillover indicators
+df_prep_spillover_unique <- df_CS_model_preparation_unique %>%
+  dplyr::mutate(
+    treated_unit = binary_potential_hospital_closure,
+    neighbors = purrr::map(1:nrow(adjacency_matrix_unique), ~ which(adjacency_matrix_unique[.x, ] == 1)),
+    spillover_unit = purrr::map_lgl(neighbors, ~ any(treated_unit[.x] == 1)),
+    treatment_status_spillover = dplyr::case_when(
+      treated_unit ~ "direct_treated",
+      spillover_unit ~ "spillover",
+      TRUE ~ "control"
+    ),
+    treatment_status_spillover = dplyr::if_else(
+      non_binary_potential_hospital_closure == "Unclear Treatment Status",
+      "unclear treatment status",
+      treatment_status_spillover
+    )
+  )
+
+# Merge treatment status with employment dataset
+df_combined_hospital_data_employment_enriched <- df_combined_hospital_data_employment %>%
+  dplyr::left_join(
+    df_prep_spillover_unique %>%
+      dplyr::distinct(ARS, treatment_status_spillover),
+    by = "ARS"
+  )
+
+# Print overview
+table(
+  df_combined_hospital_data_employment_enriched %>%
+    dplyr::distinct(ARS, .keep_all = TRUE) %>%
+    dplyr::pull(treatment_status_spillover)
+)
+
+table(df_prep_spillover_unique$treatment_status_spillover)
+
+```
+
+```{r plot_spillover_map}
+# Prepare municipality dataset for plotting
+df_plot_map_treatment_spillover_municipality <- df_combined_hospital_data_employment_enriched %>%
+  dplyr::mutate(
+    treatment_status_spillover = dplyr::case_when(
+      treatment_status_spillover == "direct_treated" ~ "Unit With Direct Treatment",
+      treatment_status_spillover == "control" ~ "Control Unit",
+      treatment_status_spillover == "spillover" ~ "(Potential) Spillover Unit",
+      treatment_status_spillover == "unclear treatment status" ~ "Unit With Unclear Treatment Status"
+    )
+  )
+
+# Create spillover map
+plot_map_treatment_spillover_municipality <- ggplot2::ggplot(
+  data = df_plot_map_treatment_spillover_municipality %>%
+    dplyr::distinct(ARS, .keep_all = TRUE)
+) +
+  ggplot2::geom_sf(data = df_plot_map_hospital_closures_municipality %>%
+                     dplyr::distinct(ARS, .keep_all = TRUE),
+                   ggplot2::aes(color = as.factor(RegioStaR4from5)),
+                   color = "grey80", fill = NA, linewidth = 0.00001) +
+  ggplot2::geom_sf(ggplot2::aes(fill = treatment_status_spillover, geometry = geometry_municipality)) +
+  ggplot2::geom_sf(data = states_border_clean_sf, color = "black", fill = NA, linewidth = .5) +
+  ggplot2::geom_sf(data = df_internal_borders, color = "black", fill = NA, linewidth = .5) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    panel.grid = ggplot2::element_blank(),
+    axis.text = ggplot2::element_blank(),
+    axis.ticks = ggplot2::element_blank(),
+    panel.border = ggplot2::element_blank(),
+    legend.position = "right"
+  ) +
+  ggplot2::scale_fill_manual(values = c(
+    "Unit With Direct Treatment" = "#88CCEE",
+    "Control Unit" = "#117733",
+    "(Potential) Spillover Unit" = "#DDCC77",
+    "Unit With Unclear Treatment Status" = "#CC6677"
+    # alternative suggestion for fill: "brewer.dark2" if desired
+  )) +
+  ggplot2::labs(
+    title = NULL,
+    fill = "Classification of Municipalities \n(With Sufficient Data)"
+  )
+
+# Print plot
+print(plot_map_treatment_spillover_municipality)
+
+# Commented out: Save manually later
+# ggplot2::ggsave("images/plot_map_treatment_spillover_control.pdf", plot = plot_map_treatment_spillover_municipality, width = 8, height = 6)
+
+```
+
+```{r Callaway, Sant’Anna Difference-in-Differences (DiD) Setup}
+# Prepare dataframe for Callaway & Sant'Anna DiD estimation
+df_CS_model_preparation <- df_combined_hospital_data_employment_enriched %>%
+  dplyr::filter(
+    treatment_status_spillover %in% c("control", "direct_treated")
+  ) %>%
+  dplyr::mutate(
+    ARS = as.numeric(ARS),
+    year_of_closure = as.numeric(as.character(year_of_closure)),
+    year_of_closure = dplyr::if_else(is.na(year_of_closure), 0, year_of_closure)
+  )
+
+```
+
+
+
+
+```{r create_demographic_tables}
+# Add hospital closure indicator
+df_regiostar_complete_closure_indicated <- df_regiostar_complete %>%
+  dplyr::mutate(
+    hospital_closure = ARS %in% df_confirmed_closures_ARS$ARS
+  )
+
+# Build demographic distribution for full sample
+df_demographic_distribution_full_data <- df_regiostar_complete_closure_indicated %>%
+  sf::st_drop_geometry() %>%
+  dplyr::filter(!is.na(RegioStaR6from7)) %>%
+  dplyr::distinct(ARS, .keep_all = TRUE) %>%
+  dplyr::group_by(RegioStaR6from7, hospital_closure) %>%
+  dplyr::summarise(count = dplyr::n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = hospital_closure, values_from = count, values_fill = 0) %>%
+  dplyr::rename(
+    Control = `FALSE`,
+    Treated = `TRUE`
+  ) %>%
+  dplyr::mutate(
+    Total = Control + Treated,
+    Treated_Share_Municipality = scales::percent(Treated / Total, accuracy = 0.01),
+    Treated_Share_Treated = scales::percent(Treated / sum(Treated), accuracy = 0.01)
+  ) %>%
+  dplyr::mutate(
+    Municipality_Type = dplyr::case_when(
+      RegioStaR6from7 == "71/72" ~ "Metropolis, Regiopolis or Large City (Urban Region)",
+      RegioStaR6from7 == "73"    ~ "Medium-Sized City (Urban Region)",
+      RegioStaR6from7 == "74"    ~ "Small-Town / Village Area (Urban Region)",
+      RegioStaR6from7 == "75"    ~ "Central City (Rural Region)",
+      RegioStaR6from7 == "76"    ~ "Medium-Sized City (Rural Region)",
+      RegioStaR6from7 == "77"    ~ "Small-Town / Village Area (Rural Region)",
+      TRUE ~ RegioStaR6from7
+    )
+  ) %>%
+  dplyr::select(
+    Municipality_Type, Control, Treated, Total, Treated_Share_Municipality, Treated_Share_Treated
+  ) %>%
+  dplyr::mutate(Sample = "Full Dataset")
+
+```
+
+```{r}
+# Build demographic distribution for DiD sample
+df_demographic_distribution_did <- df_CS_model_preparation %>%
+  dplyr::filter(Year < 2021) %>%
+  dplyr::filter(!is.na(RegioStaR6from7)) %>%
+  dplyr::distinct(ARS, .keep_all = TRUE) %>%
+  dplyr::group_by(RegioStaR6from7, hospital_closure) %>%
+  dplyr::summarise(count = dplyr::n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = hospital_closure, values_from = count, values_fill = 0) %>%
+  dplyr::rename(
+    Control = `FALSE`,
+    Treated = `TRUE`
+  ) %>%
+  dplyr::mutate(
+    Total = Control + Treated,
+    Treated_Share_Municipality = scales::percent(Treated / Total, accuracy = 0.01),
+    Treated_Share_Treated = scales::percent(Treated / sum(Treated), accuracy = 0.01)
+  ) %>%
+  dplyr::mutate(
+    Municipality_Type = dplyr::case_when(
+      RegioStaR6from7 == "71/72" ~ "Metropolis, Regiopolis or Large City (Urban Region)",
+      RegioStaR6from7 == "73"    ~ "Medium-Sized City (Urban Region)",
+      RegioStaR6from7 == "74"    ~ "Small-Town / Village Area (Urban Region)",
+      RegioStaR6from7 == "75"    ~ "Central City (Rural Region)",
+      RegioStaR6from7 == "76"    ~ "Medium-Sized City (Rural Region)",
+      RegioStaR6from7 == "77"    ~ "Small-Town / Village Area (Rural Region)",
+      TRUE ~ RegioStaR6from7
+    )
+  ) %>%
+  dplyr::select(
+    Municipality_Type, Control, Treated, Total, Treated_Share_Municipality, Treated_Share_Treated
+  ) %>%
+  dplyr::mutate(Sample = "DiD Sample Only")
+
+```
+
+```{r}
+# Combine both tables for comparison
+df_combined_demographic_distribution <- dplyr::bind_rows(
+  df_demographic_distribution_full_data,
+  df_demographic_distribution_did
+) %>%
+  dplyr::arrange(Municipality_Type, dplyr::desc(Sample))  # Sort nicely
+
+df_combined_demographic_distribution
+```
+
+```{r}
+# Create bracketed summary table
+df_bracket_approach <- df_demographic_distribution_full_data %>%
+  dplyr::rename_with(~ paste0(.x, "_full"), -Municipality_Type) %>%
+  dplyr::inner_join(
+    df_demographic_distribution_did %>%
+      dplyr::rename_with(~ paste0(.x, "_did"), -Municipality_Type),
+    by = "Municipality_Type"
+  ) %>%
+  dplyr::mutate(
+    `Without Hospital Closure` = paste0(`Control_full`, " (", `Control_did`, ")"),
+    `With Hospital Closure` = paste0(`Treated_full`, " (", `Treated_did`, ")"),
+    `Total` = paste0(`Total_full`, " (", `Total_did`, ")"),
+    `Share with Hospital Closures` = paste0(`Treated_Share_Municipality_full`, " (", `Treated_Share_Municipality_did`, ")"),
+    `Share of Hospital Closures` = paste0(`Treated_Share_Treated_full`, " (", `Treated_Share_Treated_did`, ")")
+  ) %>%
+  dplyr::select(
+    Municipality_Type,
+    `Without Hospital Closure`,
+    `With Hospital Closure`,
+    `Total`,
+    `Share with Hospital Closures`,
+    `Share of Hospital Closures`
+  )
+
+df_bracket_approach
+```
+
+# Parallel Trends Visualization
+
+```{r plot_parallel_trends}
+# Prepare data: Compute average employment levels per year, separated by municipality type
+df_parallel_trends <- df_CS_model_preparation %>%
+  dplyr::filter(Year < 2021) %>%
+  dplyr::group_by(ARS) %>%
+  dplyr::filter(
+    all(!is.na(employment_level)),  
+    all(!is.na(employment_level_female))
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(treatment_status_spillover %in% c("direct_treated", "control")) %>%
+  dplyr::mutate(
+    treated_pre = dplyr::if_else(treatment_status_spillover == "direct_treated" & Year < year_of_closure, "Treated (Pre-Treatment)", NA_character_),
+    group = dplyr::case_when(
+      treatment_status_spillover == "control" ~ "Non-Treated",
+      treatment_status_spillover == "direct_treated" & Year < year_of_closure ~ "Treated (Pre-Treatment)"
+    )
+  ) %>%
+  dplyr::filter(!is.na(group)) %>%
+  dplyr::group_by(Year, group, RegioStaR4from5) %>%
+  dplyr::summarise(
+    employment = mean(employment_level, na.rm = TRUE),
+    employment_female = mean(employment_level_female, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  tidyr::pivot_longer(cols = c(employment, employment_female), 
+                      names_to = "Employment_Type", 
+                      values_to = "Employment_Value") %>%
+  dplyr::rename(identifier = group) %>%
+  dplyr::mutate(
+    Employment_Type = dplyr::case_when(
+      Employment_Type == "employment" ~ "Overall Employment",
+      Employment_Type == "employment_female" ~ "Female Employment"
+    ),
+    RegioStaR4from5 = dplyr::case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region: \nMetropolis, \nLarge City",
+      RegioStaR4from5 == "53" ~ "Urban Region: \nSurrounding Area",
+      RegioStaR4from5 == "54" ~ "Rural Region: \nCity, \nUrban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region: \nSmall-Town, \nVillage Area",
+      TRUE ~ RegioStaR4from5
+    )
+  )
+
+# Extract individual trajectories for treated units
+df_individual_trajectories <- df_CS_model_preparation %>%
+  dplyr::filter(treatment_status_spillover == "direct_treated") %>%
+  dplyr::filter(Year < year_of_closure) %>%
+  dplyr::select(ARS, Year, employment_level, employment_level_female, RegioStaR4from5) %>%
+  tidyr::pivot_longer(cols = c(employment_level, employment_level_female), 
+                      names_to = "Employment_Type", 
+                      values_to = "Employment_Value") %>%
+  dplyr::rename(identifier = ARS) %>%
+  dplyr::mutate(
+    Employment_Type = dplyr::case_when(
+      Employment_Type == "employment_level" ~ "Overall Employment",
+      Employment_Type == "employment_level_female" ~ "Female Employment"
+    ),
+    RegioStaR4from5 = dplyr::case_when(
+      RegioStaR4from5 == "51/52" ~ "Urban Region: \nMetropolis, \nLarge City",
+      RegioStaR4from5 == "53" ~ "Urban Region: \nSurrounding Area",
+      RegioStaR4from5 == "54" ~ "Rural Region: \nCity, \nUrban Area",
+      RegioStaR4from5 == "55" ~ "Rural Region: \nSmall-Town, \nVillage Area",
+      TRUE ~ RegioStaR4from5
+    )
+  )
+
+# Plot parallel trends
+plot_parallel_trends_complete <- ggplot2::ggplot() +
+  ggplot2::geom_line(
+    data = df_individual_trajectories, 
+    ggplot2::aes(x = Year, y = Employment_Value, group = identifier),
+    color = "gray50", alpha = 0.4, linewidth = 0.75
+  ) +
+  ggplot2::geom_line(
+    data = df_parallel_trends,
+    ggplot2::aes(x = Year, y = Employment_Value, color = identifier, group = identifier),
+    linewidth = 1
+  ) +
+  ggplot2::geom_point(
+    data = df_parallel_trends,
+    ggplot2::aes(x = Year, y = Employment_Value, color = identifier, group = identifier),
+    size = 2.5
+  ) +
+  ggplot2::facet_grid(Employment_Type ~ RegioStaR4from5) +
+  ggplot2::labs(
+    title = NULL,
+    subtitle = NULL,
+    caption = "Gray lines represent individual treated units until closure occurrence",
+    x = "Year",
+    y = "Average Employment Level",
+    color = "Group"
+  ) +
+  ggplot2::scale_color_manual(
+    values = c4a(palette = "brewer.dark2")
+  ) +
+  ggplot2::scale_y_continuous(
+    labels = scales::label_percent(scale = 1)
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = seq(2010, 2020, by = 5),
+    minor_breaks = seq(2005, 2020, by = 1)
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom",
+    legend.title = ggplot2::element_text(size = 14),
+    legend.text = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 14),
+    axis.text = ggplot2::element_text(size = 12),
+    strip.text = ggplot2::element_text(size = 12, face = "bold"),
+    plot.caption = ggplot2::element_text(size = 12)
+  )
+
+# Print the plot
+plot_parallel_trends_complete
+
+# Commented out: Save manually later
+# ggplot2::ggsave(
+#   filename = "images/plot_parallel_trends.png",
+#   plot = plot_parallel_trends_complete,
+#   width = 8,
+#   height = 6,
+#   dpi = 300
+# )
+```

@@ -1,3 +1,5 @@
+if (!requireNamespace("rmarkdown", quietly = TRUE)) install.packages("rmarkdown")
+
 required_packages <- c(
   "tidyverse",
   "sf", "giscoR", "rmapshaper", "rnaturalearth", "rnaturalearthhires",
