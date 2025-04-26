@@ -4,7 +4,7 @@ output: html_document
 ---
 
 
-# Robustness Tests: Placebo Tests
+# Placebo Tests
 
 ```{r}
 set.seed(123)  # For reproducibility
@@ -302,7 +302,7 @@ table_dynamic_ATT_female
 ```
 
 
-#### 2-Type Municipality Typology (Urban vs Rural Regions)
+## Rurality Subgroup Model
 ```{r}
 # Step 1: Estimate ATT separately for each RegioStaR2 group
 att_results_by_group_2 <- list()
@@ -582,7 +582,7 @@ plot_subgroups_dynamic_ATT_facet
 
 ```
 
-##Robustness Tests: Allowing for Anticipation Effect
+# Alternative Model Anticipation Effect
 
 ```{r}
 # Step 1: Estimate ATT allowing for 1-year anticipation
@@ -729,7 +729,7 @@ plot_dynamic_ATT_anticipation
 
 
 
-### Robustness Test: Including vs Excluding Spillover Units
+# Alternative Model Including Spillover Units
 
 ```{r}
 # Step 1: Prepare the robustness dataset (including spillover units)
