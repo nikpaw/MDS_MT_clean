@@ -39,17 +39,17 @@ rmd_analysis_files <- list(
   here::here("R", "03_3_conduct_robustness_tests.Rmd")
 )
 
-# for (file in rmd_analysis_files) {
-#   if (file.exists(file)) {
-#     cat("-> Running:", basename(file), "\n")
-#     rmarkdown::render(
-#       input = file,
-#       output_dir = here::here("output", "reports")
-#     )
-#   } else {
-#     cat("!! File not found:", file, "\n")
-#   }
-# }
+for (file in rmd_analysis_files) {
+  if (file.exists(file)) {
+    cat("-> Running:", basename(file), "\n")
+    rmarkdown::render(
+      input = file,
+      output_dir = here::here("output", "reports")
+    )
+  } else {
+    cat("!! File not found:", file, "\n")
+  }
+}
 
 
 cat("\n==== Reproducible Project Setup Completed ====\n")
