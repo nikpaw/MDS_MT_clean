@@ -4,7 +4,7 @@ output: html_document
 ---
 
 
-### Robustness Tests: Placebo Tests
+# Robustness Tests: Placebo Tests
 
 ```{r}
 set.seed(123)  # For reproducibility
@@ -176,7 +176,131 @@ plot_placebo_facet
 
 
 
-### Robustness Tests: Subgroup Analyses
+# Subgroup Analyses
+
+## Gender Subgroup Model
+```{r}
+# Step 1: Estimate ATT for female employment
+CS_baseline_DR_results_female <- did::att_gt(
+  yname = "employment_level_female",
+  tname = "Year",
+  idname = "ARS",
+  gname = "year_of_closure",
+  data = df_CS_model_preparation %>%
+    dplyr::filter(year_of_closure < 2021),
+  xformla = ~ RegioStaR4from5,
+  control_group = "nevertreated",
+  anticipation = 0
+)
+
+# Step 2: Compute dynamic and simple overall effects
+CS_baseline_DR_dynamic_effect_female <- did::aggte(
+  CS_baseline_DR_results_female, 
+  type = "dynamic",
+  max_e = 8,
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+CS_baseline_DR_simple_effect_female <- did::aggte(
+  CS_baseline_DR_results_female,
+  type = "simple",
+  bstrap = TRUE,
+  na.rm = TRUE
+)
+
+# Step 3: Prepare dynamic ATT results for plotting
+CS_baseline_DR_dynamic_data_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  dplyr::mutate(
+    time_periods = event.time,
+    period = factor(
+      dplyr::if_else(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Optional: Store in a list for future use
+CS_baseline_DR_results_combined_female <- list(
+  att_model = CS_baseline_DR_results_female,
+  dynamic_effect = CS_baseline_DR_dynamic_effect_female,
+  simple_effect = CS_baseline_DR_simple_effect_female
+)
+
+# Print simple effect summary
+CS_baseline_DR_simple_effect_female
+
+```
+
+```{r}
+# Step 4: Plot dynamic ATT for female employment
+plot_dynamic_ATT_female <- ggplot2::ggplot(
+  data = CS_baseline_DR_dynamic_data_female,
+  ggplot2::aes(x = time_periods, y = estimate, color = period)
+) +
+  ggplot2::geom_point(size = 2) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = conf.low, ymax = conf.high),
+    width = 0.3
+  ) +
+  ggplot2::geom_hline(yintercept = 0, color = "black") +
+  ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+  ggplot2::scale_color_manual(
+    values = c(
+      "Pre-Treatment" = "#855C75",
+      "Post-Treatment" = "#D9AF6B"
+    ),
+    name = "Treatment Period",
+    labels = c("Before Treatment", "After Treatment")
+  ) +
+  ggplot2::labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(-3, 1, 0.5),
+    minor_breaks = seq(-3, 1, 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = seq(-12, 8, 2),
+    minor_breaks = seq(-13, 8, 1)
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom"
+  )
+
+# Display plot
+plot_dynamic_ATT_female
+
+# Optionally save manually
+# ggsave("images/plot_dynamic_att_female.png", plot_dynamic_ATT_female, width = 8, height = 6, dpi = 300)
+
+```
+
+```{r}
+# Create cleaned table of dynamic ATT results (female employment)
+table_dynamic_ATT_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  dplyr::select(
+    event.time, estimate, std.error, point.conf.low, conf.low, point.conf.high, conf.high
+  ) %>%
+  dplyr::mutate(across(where(is.numeric), round, 3)) %>%
+  dplyr::rename(
+    `Event Time` = event.time,
+    `Estimate` = estimate,
+    `Std. Error` = std.error,
+    `95% CI Lower (Pointwise)` = point.conf.low,
+    `95% CI Upper (Pointwise)` = point.conf.high,
+    `95% CI Lower (Simultaneous)` = conf.low,
+    `95% CI Upper (Simultaneous)` = conf.high
+  )
+
+# View the table
+table_dynamic_ATT_female
+
+```
+
 
 #### 2-Type Municipality Typology (Urban vs Rural Regions)
 ```{r}
@@ -341,8 +465,122 @@ plot_dynamic_ATT_combined
 
 ```
 
+## Combine Subgroup Models Into Facet Plot
 
+```{r}
+# Prepare gender subgroup data
+df_did_full_DR_all <- broom::tidy(CS_baseline_DR_dynamic_effect) %>%
+  dplyr::mutate(
+    gender_group = "Overall Employment",
+    time_periods = event.time,
+    period = factor(
+      dplyr::if_else(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
 
+df_did_full_DR_female <- broom::tidy(CS_baseline_DR_dynamic_effect_female) %>%
+  dplyr::mutate(
+    gender_group = "Female Employment",
+    time_periods = event.time,
+    period = factor(
+      dplyr::if_else(event.time < 0, "Pre-Treatment", "Post-Treatment"),
+      levels = c("Pre-Treatment", "Post-Treatment")
+    )
+  )
+
+# Combine both
+df_combined_gender <- dplyr::bind_rows(df_did_full_DR_all, df_did_full_DR_female) %>%
+  dplyr::mutate(
+    group_period = paste(gender_group, period, sep = " - "),
+    facet_group = "By Gender"
+  )
+
+# Add facet label to rurality data
+df_combined_rurality <- all_dynamic_results_by_group_2 %>%
+  dplyr::mutate(
+    facet_group = "By Rurality",
+    group_period = paste(municipality_type, period, sep = " - ")
+  )
+
+# Merge both datasets
+df_subgroup_facet_combined <- dplyr::bind_rows(
+  df_combined_gender,
+  df_combined_rurality
+)
+
+```
+
+```{r}
+# Define custom color palette
+subgroup_facet_colors <- c(
+  "Urban Region - Pre-Treatment" = colorspace::lighten("#6A3D9A", amount = 0.25),
+  "Urban Region - Post-Treatment" = "#6A3D9A",
+  "Rural Region - Pre-Treatment" = colorspace::lighten("#B15928", amount = 0.25),
+  "Rural Region - Post-Treatment" = "#B15928",
+  "Overall Employment - Pre-Treatment" = colorspace::lighten("#88CCEE", amount = 0.3),
+  "Overall Employment - Post-Treatment" = "#88CCEE",
+  "Female Employment - Pre-Treatment" = colorspace::lighten("#117733", amount = 0.3),
+  "Female Employment - Post-Treatment" = "#117733"
+)
+
+# Create plot
+plot_subgroups_dynamic_ATT_facet <- ggplot2::ggplot(
+  data = df_subgroup_facet_combined,
+  ggplot2::aes(x = time_periods, y = estimate, color = group_period)
+) +
+  ggplot2::geom_point(size = 3, position = ggplot2::position_dodge(width = 0.5)) +
+  ggplot2::geom_errorbar(
+    ggplot2::aes(ymin = conf.low, ymax = conf.high),
+    width = 0.5, position = ggplot2::position_dodge(width = 0.5),
+    linewidth = 1.2
+  ) +
+  ggplot2::geom_hline(yintercept = 0, color = "black") +
+  ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "black", alpha = 0.2) +
+  ggplot2::facet_wrap(~ facet_group, nrow = 1) +
+  ggplot2::scale_color_manual(
+    values = subgroup_facet_colors,
+    breaks = c(
+      "Overall Employment - Post-Treatment",
+      "Female Employment - Post-Treatment",
+      "Urban Region - Post-Treatment",
+      "Rural Region - Post-Treatment"
+    ),
+    labels = c("Overall Employment", "Female Employment", "Urban Region", "Rural Region"),
+    name = "Subgroup\n(Lighter = Pre-Treatment)"
+  ) +
+  ggplot2::labs(
+    title = NULL,
+    x = "Years Relative to Treatment",
+    y = "Average Treatment Effect (with 95% CI)"
+  ) +
+  ggplot2::scale_y_continuous(
+    breaks = seq(-3, 1, by = 0.5),
+    minor_breaks = seq(-3, 1, by = 0.25),
+    labels = scales::label_percent(scale = 1)
+  ) +
+  ggplot2::scale_x_continuous(
+    breaks = seq(-12, 8, by = 2),
+    minor_breaks = seq(-13, 8, by = 1)
+  ) +
+  ggplot2::theme_minimal() +
+  ggplot2::theme(
+    legend.position = "bottom",
+    panel.spacing = unit(4, "lines"),
+    legend.title = ggplot2::element_text(size = 14),
+    legend.text = ggplot2::element_text(size = 14),
+    axis.title = ggplot2::element_text(size = 14),
+    axis.text = ggplot2::element_text(size = 12),
+    strip.text = ggplot2::element_text(size = 16, face = "bold")
+  )
+
+# Print the plot
+plot_subgroups_dynamic_ATT_facet
+
+# Optionally save manually
+# ggsave("images/plot_subgroups_dynamic_ATT_facet.png", width = 12, height = 5, dpi = 300)
+
+```
 
 ##Robustness Tests: Allowing for Anticipation Effect
 

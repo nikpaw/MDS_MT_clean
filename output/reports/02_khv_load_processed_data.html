@@ -387,9 +387,9 @@ if (any(duplicates_found)) {
 }</code></pre>
 <pre><code>## There are duplicate rows based on the combination of Name and Adresse.</code></pre>
 <pre><code>## # A tibble: 1 × 12
-##   Name                                              Adresse  year Land  Kreis Gemeinde Traeger EinrichtungsTyp Ungefähre_Adresse.x coordinates latitude longitude
-##   &lt;chr&gt;                                             &lt;chr&gt;   &lt;dbl&gt; &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;           &lt;dbl&gt; &lt;chr&gt;               &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
-## 1 Klinikum St. Georg GmbH, Hauptstandort Leipzig E… Eiting…  2022 14    713   000            1               2 &lt;NA&gt;                &lt;NA&gt;            51.3      12.4</code></pre>
+##   Name                            Adresse  year Land  Kreis Gemeinde Traeger EinrichtungsTyp Ungefähre_Adresse.x coordinates latitude longitude
+##   &lt;chr&gt;                           &lt;chr&gt;   &lt;dbl&gt; &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;           &lt;dbl&gt; &lt;chr&gt;               &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
+## 1 Klinikum St. Georg GmbH, Haupt… Eiting…  2022 14    713   000            1               2 &lt;NA&gt;                &lt;NA&gt;            51.3      12.4</code></pre>
 <pre class="r"><code># Filter manually for a known manually confirmed problematic hospital entry
 filtered_rows &lt;- dplyr::filter(df_khv_2022_geocoded, Name == &quot;Klinikum St. Georg GmbH, Hauptstandort Leipzig Eutritzsch, PIA - VGP Eitingonstr.&quot;)
 
