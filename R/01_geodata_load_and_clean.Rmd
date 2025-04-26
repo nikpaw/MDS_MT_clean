@@ -116,10 +116,10 @@ df_states_geo_clean <- df_states_geo %>%
   sf::st_transform(25832)
 
 # Simplify geometry to reduce detail and size
-df_states_geo_simplified <- rmapshaper::ms_simplify(df_states_geo_clean, keep = 0.05, keep_shapes = TRUE)
+# df_states_geo_simplified <- rmapshaper::ms_simplify(df_states_geo_clean, keep = 0.5, keep_shapes = TRUE)
 
 # Extract shared internal boundaries between states
-df_internal_borders <- rmapshaper::ms_innerlines(df_states_geo_simplified)
+df_internal_borders <- rmapshaper::ms_innerlines(df_states_geo_clean)
 ```
 
 
@@ -156,12 +156,18 @@ ggplot() +
 # Define output directory for processed geodata
 fs::dir_create(here::here("data", "processed", "geodata"))
 
-# Export as GeoPackage (great for storing multiple layers and preserving geometry)
-sf::st_write(df_regiostar_geo, here::here("data", "processed", "geodata", "df_regiostar_geo.gpkg"), delete_dsn = TRUE)
-sf::st_write(df_states_geo, here::here("data", "processed", "geodata", "df_states_geo.gpkg"), delete_dsn = TRUE)
-sf::st_write(df_states_geo_simplified, here::here("data", "processed", "geodata", "df_states_geo_simplified.gpkg"), delete_dsn = TRUE)
-sf::st_write(df_internal_borders, here::here("data", "processed", "geodata", "df_internal_borders.gpkg"), delete_dsn = TRUE)
-sf::st_write(states_border_clean_sf, here::here("data", "processed", "geodata", "states_border_clean_sf.gpkg"), delete_dsn = TRUE)
+# Set base path for processed geodata
+path_base_geodata_processed <- here::here("data", "processed", "geodata")
+
+
+# Export as geopackage
+sf::st_write(shp_gemeinde, here::here(path_base_geodata_processed, "shp_gemeinde.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_regiostar_complete, here::here(path_base_geodata_processed, "df_regiostar_complete.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_regiostar_geo, here::here(path_base_geodata_processed, "df_regiostar_geo.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_states_geo, here::here(path_base_geodata_processed, "df_states_geo.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_states_geo_simplified, here::here(path_base_geodata_processed, "df_states_geo_simplified.gpkg"), delete_dsn = TRUE)
+sf::st_write(df_internal_borders, here::here(path_base_geodata_processed, "df_internal_borders.gpkg"), delete_dsn = TRUE)
+sf::st_write(states_border_clean_sf, here::here(path_base_geodata_processed, "states_border_clean_sf.gpkg"), delete_dsn = TRUE)
 
 ```
 

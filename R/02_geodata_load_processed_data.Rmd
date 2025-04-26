@@ -1,0 +1,21 @@
+---
+title: "02_geodata_load_processed_data"
+output: html_document
+---
+
+```{r}
+### Load Processed Geodata from "reproducible" Folder
+
+# Set base path for reproducible geodata
+path_base_geodata_reproducible <- here::here("data", "reproducible", "geodata")
+
+# Load each geodata file individually
+shp_gemeinde <- sf::st_read(file.path(path_base_geodata_reproducible, "shp_gemeinde.gpkg"))
+df_regiostar_complete <- sf::st_read(file.path(path_base_geodata_reproducible, "df_regiostar_complete.gpkg"))
+df_regiostar_geo <- sf::st_read(file.path(path_base_geodata_reproducible, "df_regiostar_geo.gpkg"))
+df_states_geo <- sf::st_read(file.path(path_base_geodata_reproducible, "df_states_geo.gpkg"))
+df_states_geo_simplified <- sf::st_read(file.path(path_base_geodata_reproducible, "df_states_geo_simplified.gpkg"))
+df_internal_borders <- sf::st_read(file.path(path_base_geodata_reproducible, "df_internal_borders.gpkg"))
+states_border_clean_sf <- sf::st_read(file.path(path_base_geodata_reproducible, "states_border_clean_sf.gpkg"))
+```
+

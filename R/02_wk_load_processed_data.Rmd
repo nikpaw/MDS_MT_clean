@@ -1,0 +1,60 @@
+---
+title: "02_wk_load_processed_data"
+output: html_document
+---
+
+```{r}
+### Load Processed WK Data from "reproducible" Folder
+
+# Set base path for reproducible wk data
+path_base_wk_reproducible <- here::here("data", "reproducible", "wk_data")
+
+# Load each wk dataset individually
+df_wk_employment_long <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_employment_long.csv"))
+df_wk_finance_long <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_finance_long.csv"))
+df_wk_training_long <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_training_long.csv"))
+df_wk_demographics_long <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_demographics_long.csv"))
+df_wk_social_long <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_social_long.csv"))
+
+df_wk_employment_wide <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_employment_wide.csv"))
+df_wk_finance_wide <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_finance_wide.csv"))
+df_wk_training_wide <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_training_wide.csv"))
+df_wk_demographics_wide <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_demographics_wide.csv"))
+df_wk_social_wide <- readr::read_csv(file.path(path_base_wk_reproducible, "wk_social_wide.csv"))
+
+# Optional: Print small confirmation
+cat("Loaded reproducible WK datasets successfully.\n")
+
+```
+
+```{r}
+df_wk_employment_wide <- readr::read_csv(file.path(here::here("data", "reproducible", "wk_data", "wk_employment_wide.csv")))
+
+df_dependent_variables <- df_wk_employment_wide %>%
+  dplyr::select(
+    "Kommune", "GKZ", "ARS", "Bundesland", "Landkreis", "Demografietyp", "year",
+    "Beschäftigungsquote (%)",
+    "Frauenbeschäftigungsquote (%)",
+    "Beschäftigungsquote 55- bis 64-Jährige (%)"
+  ) %>%
+  dplyr::rename(
+     Year = "year",
+     employment_level = "Beschäftigungsquote (%)",
+    employment_level_female = "Frauenbeschäftigungsquote (%)"
+  ) %>%
+  dplyr::group_by(ARS) %>%
+  dplyr::mutate(
+    employment_level = zoo::na.approx(employment_level, na.rm = FALSE, maxgap = 3),
+    employment_level_female = zoo::na.approx(employment_level_female, na.rm = FALSE, maxgap = 3)
+  ) %>%
+  dplyr::ungroup() %>%
+  dplyr::filter(!Year %in% c(2021, 2022)) %>%
+  dplyr::group_by(ARS) %>%
+  dplyr::mutate(
+    employment_level = zoo::na.approx(employment_level, na.rm = FALSE, maxgap = 3),
+    employment_level_female = zoo::na.approx(employment_level_female, na.rm = FALSE, maxgap = 3)
+  ) %>%
+  dplyr::ungroup()
+```
+
+
