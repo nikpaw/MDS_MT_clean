@@ -11,7 +11,7 @@
 
 
 
-<title>02_wk_load_processed_data</title>
+<title>Wegweiser Kommune: Load Processed Demographic Data</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -348,21 +348,18 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">02_wk_load_processed_data</h1>
+<h1 class="title toc-ignore">Wegweiser Kommune: Load Processed
+Demographic Data</h1>
 
 </div>
 
 
-<pre class="r"><code>df_wk_employment_wide &lt;- readr::read_csv(file.path(here::here(&quot;data&quot;, &quot;reproducible&quot;, &quot;wk_data&quot;, &quot;wk_employment_wide.csv&quot;)))</code></pre>
-<pre><code>## Rows: 50949 Columns: 32
-## ── Column specification ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-## Delimiter: &quot;,&quot;
-## chr  (6): Kommune, GKZ, ARS, Bundesland, Landkreis, Demografietyp
-## dbl (26): year, Beschäftigungsanteil im 1. Sektor (%), Beschäftigungsanteil im 2. Sektor (%), Beschäftigungsanteil im 3. Sektor (%), Arbeit...
-## 
-## ℹ Use `spec()` to retrieve the full column specification for this data.
-## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.</code></pre>
-<pre class="r"><code>df_dependent_variables &lt;- df_wk_employment_wide %&gt;%
+<pre class="r"><code>df_wk_employment_wide &lt;- readr::read_csv(
+  fs::path(path_base_wk_data_reproducible, &quot;wk_employment_wide.csv&quot;),
+  show_col_types = FALSE
+)
+
+df_dependent_variables &lt;- df_wk_employment_wide %&gt;%
   dplyr::select(
     &quot;Kommune&quot;, &quot;GKZ&quot;, &quot;ARS&quot;, &quot;Bundesland&quot;, &quot;Landkreis&quot;, &quot;Demografietyp&quot;, &quot;year&quot;,
     &quot;Beschäftigungsquote (%)&quot;,

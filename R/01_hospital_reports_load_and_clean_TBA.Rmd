@@ -9,3 +9,251 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+# Import and Process Hospital Reports
+
+## Define Paths and Setup
+
+```{r define-paths-hospitalreports}
+# Load required packages (already ensured via 00_load_packages.R)
+
+# List of all years available in hospital reports
+all_years_hospitalreports <- c(2022, 2021, 2020, 2019, 2018, 2017, 
+                               2016, 2015, 2014, 2013, 2012, 2010, 2008)
+
+# Define the base path where hospital XML files are stored
+base_path_hospitalreports <- here::here("data", "raw", "raw_data", "Krankenhaus_Qualitaetsberichte_2008-2022", "xml_")
+```
+
+## Import Data from XML Quality Reports
+
+```{r import-hospitalreports-data}
+# Loop through each year, read XML files, extract information, and create dataframes
+
+for (year in all_years_hospitalreports) {
+
+  # Construct file path for the given year
+  file_path_hospitalreports <- paste0(base_path_hospitalreports, year)
+
+  # List XML files
+  xml_files_hospitalreports <- list.files(
+    path = file_path_hospitalreports,
+    pattern = "-xml.xml",
+    full.names = TRUE
+  )
+
+  # Initialize empty lists for data collection
+  df_list_hospitalreports_location <- list()
+  df_list_hospitalreports_cases_beds <- list()
+  df_list_hospitalreports_staff <- list()
+
+  # Process each XML file
+  for (file in xml_files_hospitalreports) {
+    xml_data <- xml2::read_xml(file)
+
+    df_list_hospitalreports_location[[file]] <- extract_standortdaten(xml_data)
+    df_list_hospitalreports_cases_beds[[file]] <- extract_fallzahlen_bettzahlen(xml_data)
+    df_list_hospitalreports_staff[[file]] <- extract_personal(xml_data)
+  }
+
+  # Combine the extracted data into yearly dataframes
+  df_hospitalreports_location <- dplyr::bind_rows(df_list_hospitalreports_location)
+  df_hospitalreports_cases_beds <- dplyr::bind_rows(df_list_hospitalreports_cases_beds)
+  df_hospitalreports_staff <- dplyr::bind_rows(df_list_hospitalreports_staff)
+
+  # Add year information
+  df_hospitalreports_location$year <- year
+  df_hospitalreports_cases_beds$year <- year
+  df_hospitalreports_staff$year <- year
+
+  # Dynamically assign dataframes for each year
+  assign(paste0("df_hospitalreports_location_", year), df_hospitalreports_location)
+  assign(paste0("df_hospitalreports_cases_beds_", year), df_hospitalreports_cases_beds)
+  assign(paste0("df_hospitalreports_staff_", year), df_hospitalreports_staff)
+
+  # Clear intermediate objects
+  rm(
+    df_list_hospitalreports_location, df_list_hospitalreports_cases_beds,
+    df_list_hospitalreports_staff, xml_files_hospitalreports,
+    df_hospitalreports_location, df_hospitalreports_cases_beds, df_hospitalreports_staff
+  )
+
+  gc()
+}
+```
+
+## Combine Annual Hospital Location Data
+
+```{r combine-hospitalreports-location}
+# Combine hospital location datasets across all years
+
+df_hospitalreports_location_merged <- dplyr::bind_rows(
+  df_hospitalreports_location_2008,
+  df_hospitalreports_location_2010,
+  df_hospitalreports_location_2012,
+  df_hospitalreports_location_2013,
+  df_hospitalreports_location_2014,
+  df_hospitalreports_location_2015,
+  df_hospitalreports_location_2016,
+  df_hospitalreports_location_2017,
+  df_hospitalreports_location_2018,
+  df_hospitalreports_location_2019,
+  df_hospitalreports_location_2020,
+  df_hospitalreports_location_2021,
+  df_hospitalreports_location_2022
+)
+
+# Sort merged dataframe by important columns
+df_hospitalreports_location_merged_sorted <- df_hospitalreports_location_merged %>%
+  dplyr::arrange(Postleitzahl, Strasse, Hausnummer, IK_Institutionskennzeichen, Name, year)
+
+# Optional: View first rows
+head(df_hospitalreports_location_merged_sorted)
+```
+
+# Export annual hospital dataframes for location, cases_beds and staff 
+
+```{r Export Annual Hospital Report Dataframes}
+# Define export folder
+path_output_hospitalreports <- here::here("data", "processed", "hospital_reports")
+
+# Create the folder if it doesn't exist yet
+if (!dir.exists(path_output_hospitalreports)) {
+  dir.create(path_output_hospitalreports, recursive = TRUE)
+}
+
+# Export location dataframes for all years
+for (year in all_years_hospitalreports) {
+  df_name <- paste0("df_hospitalreports_location_", year)
+  df <- get(df_name)
+  file_path <- file.path(path_output_hospitalreports, paste0(df_name, ".csv"))
+  readr::write_csv(df, file_path)
+}
+
+# Export cases and beds dataframes for all years
+for (year in all_years_hospitalreports) {
+  df_name <- paste0("df_hospitalreports_cases_beds_", year)
+  df <- get(df_name)
+  file_path <- file.path(path_output_hospitalreports, paste0(df_name, ".csv"))
+  readr::write_csv(df, file_path)
+}
+
+# Export staff dataframes for all years
+for (year in all_years_hospitalreports) {
+  df_name <- paste0("df_hospitalreports_staff_", year)
+  df <- get(df_name)
+  file_path <- file.path(path_output_hospitalreports, paste0(df_name, ".csv"))
+  readr::write_csv(df, file_path)
+}
+
+```
+
+# Geocode Hospital Location Dataframes
+
+```{r Create Hospital Index}
+df_hospitalreports_location_merged <- df_hospitalreports_location_merged %>%
+  dplyr::mutate(hospital_index = dplyr::row_number())
+
+```
+
+```{r Clean and Prepare Addresses for Geocoding}
+df_hospitalreports_addresses <- df_hospitalreports_location_merged %>%
+  dplyr::distinct(Adresse) %>%
+  dplyr::mutate(
+    Adresse_clean = Adresse %>%
+      stringr::str_replace_all(" NA,", "") %>%
+      stringr::str_replace_all("str\\.", "strasse") %>%
+      stringr::str_replace_all("Str\\.", "Strasse") %>%
+      stringr::str_replace_all("starße", "strasse") %>%
+      stringr::str_replace_all("stra&szlig;e", "strasse")
+  )
+
+```
+
+
+```{r Confirm Address Matching}
+matching_rows <- dplyr::inner_join(
+  df_hospitalreports_addresses,
+  df_hospitalreports_location_merged,
+  by = "Adresse"
+)
+
+cat("✅ Matching address rows:", nrow(matching_rows), "\n")
+
+```
+
+```{r Geocode Unique Addresses}
+df_hospitalreports_addresses_geocoded <- df_hospitalreports_addresses %>%
+  tidygeocoder::geocode(
+    address = Adresse_clean,
+    method = "osm",
+    lat = latitude,
+    long = longitude
+  )
+
+```
+
+```{r Identify and Retry Geocoding for NAs}
+# Identify NAs
+df_hospitalreports_addresses_geocoded_NA <- df_hospitalreports_addresses_geocoded %>%
+  dplyr::filter(is.na(latitude))
+
+# Further clean problematic addresses
+df_hospitalreports_addresses_geocoded_NA_cleaned <- df_hospitalreports_addresses_geocoded_NA %>%
+  dplyr::mutate(
+    Adresse_clean = stringr::str_extract(Adresse_clean, "^[0-9]{5}"),
+    Adresse_clean = stringr::str_replace_all(Adresse_clean, "Stra&szlig;e", "Strasse"),
+    Adresse_clean = stringr::str_replace(Adresse_clean, "(\\d+)-\\d+", "\\1")
+  )
+
+# Re-try geocoding
+df_hospitalreports_addresses_geocoded_NA_retry <- df_hospitalreports_addresses_geocoded_NA_cleaned %>%
+  tidygeocoder::geocode(
+    address = Adresse_clean,
+    method = "osm",
+    lat = latitude,
+    long = longitude
+  )
+
+```
+
+```{r Merge Geocoded Data (Initial + Retry + Manual)}
+# Extract latitude and longitude manually from "Coordinates"
+df_manual_geocoding <- df_manual_geocoding %>%
+  dplyr::mutate(
+    latitude_manual = as.numeric(stringr::str_extract(Coordinates, "^[^,]+")),
+    longitude_manual = as.numeric(stringr::str_extract(Coordinates, "(?<=,).*"))
+  )
+
+# Merge manual corrections into original data
+df_hospitalreports_addresses_geocoded_completed <- df_hospitalreports_addresses_geocoded %>%
+  dplyr::left_join(
+    df_manual_geocoding %>% dplyr::select(Adresse_clean, latitude_manual, longitude_manual),
+    by = "Adresse_clean"
+  ) %>%
+  dplyr::mutate(
+    latitude = dplyr::coalesce(latitude, latitude_manual),
+    longitude = dplyr::coalesce(longitude, longitude_manual)
+  ) %>%
+  dplyr::select(Adresse, Adresse_clean, latitude, longitude)
+
+```
+
+```{r Finalize Geocoded Hospital Location Data}
+df_hospitalreports_location_merged_geocoded <- df_hospitalreports_location_merged %>%
+  dplyr::left_join(
+    df_hospitalreports_addresses_geocoded_completed,
+    by = "Adresse"
+  )
+
+```
+
+```{r Export Final Geocoded Hospital Location Data}
+readr::write_csv(
+  df_hospitalreports_location_merged_geocoded,
+  file.path(path_output_hospitalreports, "df_hospitalreports_location_merged_geocoded.csv")
+)
+
+cat("✅ Final geocoded hospital location data exported.\n")
+
+```
+

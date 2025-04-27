@@ -13,7 +13,7 @@
 
 <meta name="date" content="2024-07-06" />
 
-<title>Hospital Reports: Identify and Process Hospital Closures</title>
+<title>Hospital Reports: Load Processed Data</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -350,8 +350,7 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">Hospital Reports: Identify and Process
-Hospital Closures</h1>
+<h1 class="title toc-ignore">Hospital Reports: Load Processed Data</h1>
 <h4 class="author">Niklas Pawelzik</h4>
 <h4 class="date">2024-07-06</h4>
 
@@ -360,20 +359,13 @@ Hospital Closures</h1>
 
 <div id="import-and-prepare-datasets" class="section level1">
 <h1>Import and Prepare Datasets</h1>
-<div id="define-years-and-paths" class="section level2">
-<h2>Define Years and Paths</h2>
 <pre class="r"><code># Define years for which hospital reports are available
 all_years_hospital_reports &lt;- c(2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012, 2010, 2008)
 
-# Define cleaned data folder path
-path_clean_data_folder &lt;- here(&quot;data&quot;, &quot;reproducible&quot;, &quot;hospital_reports_data&quot;)</code></pre>
-</div>
-<div id="import-dataframes" class="section level2">
-<h2>Import Dataframes</h2>
-<pre class="r"><code># Generic function to load datasets per year
+# Generic function to load datasets per year
 load_hospital_data &lt;- function(prefix) {
   for (year in all_years_hospital_reports) {
-    file_path &lt;- here(path_clean_data_folder, paste0(prefix, year, &quot;.csv&quot;))
+    file_path &lt;- here(path_base_hospital_reports_data_reproducible, paste0(prefix, year, &quot;.csv&quot;))
     assign(paste0(prefix, year), read_csv(file_path, show_col_types = FALSE), envir = .GlobalEnv)
   }
 }
@@ -385,10 +377,9 @@ load_hospital_data(&quot;df_hospital_staff_&quot;)
 
 # Import the merged and geocoded locations reference dataframe
 df_hospital_location_merged_geocoded &lt;- read_csv(
-  here(path_clean_data_folder, &quot;df_hospital_location_merged_geocoded.csv&quot;),
+  here(path_base_hospital_reports_data_reproducible, &quot;df_hospital_location_merged_geocoded.csv&quot;),
   show_col_types = FALSE
 )</code></pre>
-</div>
 </div>
 <div id="identify-closed-hospitals-across-years" class="section level1">
 <h1>Identify Closed Hospitals Across Years</h1>

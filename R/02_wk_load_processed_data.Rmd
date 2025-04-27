@@ -4,7 +4,10 @@ output: html_document
 ---
 
 ```{r}
-df_wk_employment_wide <- readr::read_csv(file.path(here::here("data", "reproducible", "wk_data", "wk_employment_wide.csv")))
+df_wk_employment_wide <- readr::read_csv(
+  fs::path(path_base_wk_data_reproducible, "wk_employment_wide.csv"),
+  show_col_types = FALSE
+)
 
 df_dependent_variables <- df_wk_employment_wide %>%
   dplyr::select(

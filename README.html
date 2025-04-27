@@ -9,11 +9,9 @@
 <meta http-equiv="X-UA-Compatible" content="IE=EDGE" />
 
 
-<meta name="author" content="Niklas Pawelzik" />
 
-<meta name="date" content="2024-07-10" />
 
-<title>KHV Register: Load Processed Hospital Register Data</title>
+<title>README</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -350,57 +348,112 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">KHV Register: Load Processed Hospital
-Register Data</h1>
-<h4 class="author">Niklas Pawelzik</h4>
-<h4 class="date">2024-07-10</h4>
 
 </div>
 
 
-<pre class="r"><code># Define all years for which geocoded slim datasets exist
-all_years_khv &lt;- c(2022, 2021, 2020, 2019, 2018, 2016, 2015, 2014, 2013, 2012, 2011, 2010, 2009, 2008)
-
-# Initialize an empty list to store yearly geocoded datasets
-list_khv_geocoded &lt;- list()
-
-# Loop through each year and import the corresponding geocoded CSV
-for (year in all_years_khv) {
-  file_path &lt;- fs::path(path_base_khv_data_reproducible, paste0(&quot;df_khv_&quot;, year, &quot;_slim_geocoded.csv&quot;))
-  
-  if (fs::file_exists(file_path)) {
-    df &lt;- readr::read_csv(file_path, show_col_types = FALSE)
-    list_khv_geocoded[[as.character(year)]] &lt;- df
-  }
-}</code></pre>
-<pre class="r"><code># Focus on the 2022 dataset for duplication checks
-df_khv_2022_geocoded &lt;- list_khv_geocoded[[&quot;2022&quot;]]
-
-# Identify duplicate entries based on a combination of Name and Adresse
-duplicates_found &lt;- duplicated(df_khv_2022_geocoded[, c(&quot;Name&quot;, &quot;Adresse&quot;)])
-
-# Summarize duplication results
-if (any(duplicates_found)) {
-  message(&quot;There are duplicate rows based on the combination of Name and Adresse.&quot;)
-  print(df_khv_2022_geocoded[duplicates_found, ])
-} else {
-  message(&quot;All rows are unique based on the combination of Name and Adresse.&quot;)
-}</code></pre>
-<pre><code>## There are duplicate rows based on the combination of Name and Adresse.</code></pre>
-<pre><code>## # A tibble: 1 × 12
-##   Name                                                                 Adresse  year Land  Kreis Gemeinde Traeger EinrichtungsTyp Ungefähre_Adresse.x coordinates latitude longitude
-##   &lt;chr&gt;                                                                &lt;chr&gt;   &lt;dbl&gt; &lt;chr&gt; &lt;chr&gt; &lt;chr&gt;      &lt;dbl&gt;           &lt;dbl&gt; &lt;chr&gt;               &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
-## 1 Klinikum St. Georg GmbH, Hauptstandort Leipzig Eutritzsch, PIA - VG… Eiting…  2022 14    713   000            1               2 &lt;NA&gt;                &lt;NA&gt;            51.3      12.4</code></pre>
-<pre class="r"><code># Filter manually for a known manually confirmed problematic hospital entry
-filtered_rows &lt;- dplyr::filter(df_khv_2022_geocoded, Name == &quot;Klinikum St. Georg GmbH, Hauptstandort Leipzig Eutritzsch, PIA - VGP Eitingonstr.&quot;)
-
-# Confirm whether the duplicate rows are fully identical across all columns
-if (nrow(filtered_rows) &lt;= 1 || all(sapply(2:nrow(filtered_rows), function(i) identical(filtered_rows[1, ], filtered_rows[i, ])))) {
-  message(&quot;All filtered rows are identical across all columns.&quot;)
-} else {
-  message(&quot;The filtered rows are not identical across all columns.&quot;)
-}</code></pre>
-<pre><code>## All filtered rows are identical across all columns.</code></pre>
+<div id="impact-of-hospital-closures-on-regional-employment" class="section level1">
+<h1>Impact of Hospital Closures on Regional Employment</h1>
+<p>This repository contains the full reproducible code and data (where
+legally possible) for the project analyzing the impact of hospital
+closures on regional employment levels in Germany.</p>
+<p>The analysis applies advanced Difference-in-Differences methods with
+multiple time periods and staggered treatment adoption (Callaway &amp;
+Sant’Anna 2020).</p>
+<hr />
+<div id="table-of-contents" class="section level2">
+<h2>Table of Contents</h2>
+<ul>
+<li><a href="#project-overview">Project Overview</a></li>
+<li><a href="#folder-structure">Folder Structure</a></li>
+<li><a href="#how-to-reproduce-the-results">How to Reproduce the
+Results</a></li>
+<li><a href="#data-sources">Data Sources</a></li>
+<li><a href="#software-requirements">Software Requirements</a></li>
+<li><a href="#project-authors">Project Authors</a></li>
+<li><a href="#license">License</a></li>
+</ul>
+<hr />
+</div>
+<div id="project-overview" class="section level2">
+<h2>Project Overview</h2>
+<p>The study estimates causal effects of hospital closures at the
+municipality level on overall and female employment levels.</p>
+<p>Robustness checks include: - Placebo tests - Subgroup analyses (urban
+vs rural areas, gender) - Spillover effects - Anticipation effects</p>
+<hr />
+</div>
+<div id="folder-structure" class="section level2">
+<h2>Folder Structure</h2>
+<pre><code>├── data/
+│   ├── raw/              # Raw source data (if available)
+│   ├── processed/        # Cleaned and processed datasets
+├── output/
+│   ├── reports/          # Rendered HTML reports
+│   ├── figures/          # Figures and plots
+│   ├── tables/           # Exported tables
+├── R/
+│   ├── Scripts and RMarkdown files, ordered by execution (00_, 01_, 02_, 03_)
+├── doc/
+│   ├── Documentation and supplementary files
+├── README.md</code></pre>
+<hr />
+</div>
+<div id="how-to-reproduce-the-results" class="section level2">
+<h2>How to Reproduce the Results</h2>
+<ol style="list-style-type: decimal">
+<li>Clone or download the repository.</li>
+<li>Open R or RStudio in the project folder.</li>
+<li>Run the master script for the reproducible analysis:</li>
+</ol>
+<pre class="r"><code>source(&quot;R/00_1_master_run_reproducible.R&quot;)</code></pre>
+<p>This script will: - Install and load required R packages - Load
+processed datasets - Merge and prepare datasets - Run estimations and
+robustness checks - Generate outputs (reports, figures, tables)</p>
+<div id="optional-full-rebuild-from-raw-data" class="section level3">
+<h3>Optional: Full Rebuild from Raw Data</h3>
+<p>If you have access to raw data and wish to reproduce every step from
+scratch:</p>
+<pre class="r"><code>source(&quot;R/00_2_alternative_master_run_from_raw.R&quot;)</code></pre>
+<p>(Note: This process is considerably more time-intensive.)</p>
+<hr />
+</div>
+</div>
+<div id="data-sources" class="section level2">
+<h2>Data Sources</h2>
+<ul>
+<li>German Federal Statistical Office (Statistisches Bundesamt)</li>
+<li>Krankenhausverzeichnis (Hospital Directory)</li>
+<li>Hospital Quality Reports (Qualitätsberichte)</li>
+<li>Regional classification systems (RegioStaR)</li>
+<li>Employment statistics</li>
+</ul>
+<p>Some raw datasets cannot be publicly shared due to licensing
+restrictions. Where possible, processed datasets are provided.</p>
+<hr />
+</div>
+<div id="software-requirements" class="section level2">
+<h2>Software Requirements</h2>
+<ul>
+<li>R version 4.2.0 or higher</li>
+<li>R packages: tidyverse, sf, did, fixest, plm, here, knitr,
+kableExtra, and others (see R/00_load_packages.R for full list)</li>
+</ul>
+<p>All required packages are installed automatically.</p>
+<hr />
+</div>
+<div id="project-authors" class="section level2">
+<h2>Project Authors</h2>
+<p><strong>Niklas Pawelzik</strong><br />
+(Lead Researcher and Author)</p>
+<hr />
+</div>
+<div id="license" class="section level2">
+<h2>License</h2>
+<p>This repository is licensed under the MIT License unless otherwise
+specified.</p>
+</div>
+</div>
 
 
 

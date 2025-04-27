@@ -902,6 +902,7 @@ plot_spillover_comparison <- ggplot(df_combined_models_test_spillover,
 # Display the plot
 plot_spillover_comparison
 
+# Save plot
 ggplot2::ggsave(
   filename = file.path(path_output_figures, "plot_spillover_comparison.png"),
   plot = plot_spillover_comparison,

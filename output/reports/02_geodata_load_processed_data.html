@@ -11,7 +11,7 @@
 
 
 
-<title>02_geodata_load_processed_data</title>
+<title>Geodata: Load Processed Spatial Datasets</title>
 
 <script>// Pandoc 2.9 adds attributes on both header and div. We remove the former (to
 // be compatible with the behavior of Pandoc < 2.8).
@@ -348,7 +348,8 @@ display: none;
 
 
 
-<h1 class="title toc-ignore">02_geodata_load_processed_data</h1>
+<h1 class="title toc-ignore">Geodata: Load Processed Spatial
+Datasets</h1>
 
 </div>
 
@@ -367,44 +368,38 @@ shp_gemeinde &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;s
 ## Bounding box:  xmin: 5.86625 ymin: 47.27012 xmax: 15.04182 ymax: 55.05878
 ## Geodetic CRS:  WGS 84</code></pre>
 <pre class="r"><code>df_regiostar_complete &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;df_regiostar_complete.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `df_regiostar_complete&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_regiostar_complete.gpkg&#39; using driver `GPKG&#39;</code></pre>
+<pre><code>## Reading layer `df_regiostar_complete&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_regiostar_complete.gpkg&#39; using driver `GPKG&#39;</code></pre>
 <pre><code>## Warning: no simple feature geometries present: returning a data.frame or tbl_df</code></pre>
 <pre class="r"><code>df_regiostar_geo &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;df_regiostar_geo.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `df_regiostar_geo&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_regiostar_geo.gpkg&#39; using driver `GPKG&#39;
+<pre><code>## Reading layer `df_regiostar_geo&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_regiostar_geo.gpkg&#39; using driver `GPKG&#39;
 ## Simple feature collection with 11107 features and 19 fields (with 11 geometries empty)
 ## Geometry type: MULTIPOLYGON
 ## Dimension:     XY
 ## Bounding box:  xmin: 5.86625 ymin: 47.27027 xmax: 15.03824 ymax: 55.05869
 ## Geodetic CRS:  WGS 84</code></pre>
 <pre class="r"><code>df_states_geo &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;df_states_geo.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `df_states_geo&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_states_geo.gpkg&#39; using driver `GPKG&#39;
+<pre><code>## Reading layer `df_states_geo&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_states_geo.gpkg&#39; using driver `GPKG&#39;
 ## Simple feature collection with 16 features and 1 field
 ## Geometry type: MULTIPOLYGON
 ## Dimension:     XY
 ## Bounding box:  xmin: 5.86625 ymin: 47.27026 xmax: 15.03824 ymax: 55.05869
 ## Geodetic CRS:  WGS 84</code></pre>
 <pre class="r"><code>df_states_geo_simplified &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;df_states_geo_simplified.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `df_states_geo_simplified&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_states_geo_simplified.gpkg&#39; using driver `GPKG&#39;
+<pre><code>## Reading layer `df_states_geo_simplified&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_states_geo_simplified.gpkg&#39; using driver `GPKG&#39;
 ## Simple feature collection with 16 features and 1 field
 ## Geometry type: MULTIPOLYGON
 ## Dimension:     XY
 ## Bounding box:  xmin: 281116.4 ymin: 5235867 xmax: 921244.9 ymax: 6098938
 ## Projected CRS: ETRS89 / UTM zone 32N</code></pre>
 <pre class="r"><code>df_internal_borders &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;df_internal_borders.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `df_internal_borders&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_internal_borders.gpkg&#39; using driver `GPKG&#39;
+<pre><code>## Reading layer `df_internal_borders&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\df_internal_borders.gpkg&#39; using driver `GPKG&#39;
 ## Simple feature collection with 29 features and 0 fields
 ## Geometry type: MULTILINESTRING
 ## Dimension:     XY
 ## Bounding box:  xmin: 310504 ymin: 5270165 xmax: 896862.4 ymax: 5980396
 ## Projected CRS: ETRS89 / UTM zone 32N</code></pre>
 <pre class="r"><code>states_border_clean_sf &lt;- sf::st_read(file.path(path_base_geodata_reproducible, &quot;states_border_clean_sf.gpkg&quot;))</code></pre>
-<pre><code>## Reading layer `states_border_clean_sf&#39; from data source 
-##   `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\states_border_clean_sf.gpkg&#39; using driver `GPKG&#39;
+<pre><code>## Reading layer `states_border_clean_sf&#39; from data source `C:\Users\nikla\OneDrive\Documents\GitHub\MDS_MT_clean\data\reproducible\geodata\states_border_clean_sf.gpkg&#39; using driver `GPKG&#39;
 ## Simple feature collection with 1 feature and 0 fields
 ## Geometry type: MULTIPOLYGON
 ## Dimension:     XY

@@ -21,6 +21,12 @@ cat("✅ All required packages loaded.\n\n")
 
 
 #### Defining Useful Paths ####
+path_base_geodata_reproducible <- here::here("data", "reproducible", "geodata")
+path_base_hospital_reports_data_reproducible <- here::here("data", "reproducible", "hospital_reports_data")
+path_base_khv_data_reproducible <- here::here("data", "reproducible", "khv_data")
+path_base_wk_data_reproducible <- here::here("data", "reproducible", "wk_data")
+
+
 path_output_figures <- here::here("output", "figures")
 path_output_reports <- here::here("output", "reports")
 

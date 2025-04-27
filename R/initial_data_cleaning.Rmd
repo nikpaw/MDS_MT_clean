@@ -1,0 +1,1458 @@
+---
+title: "functions_initial_data_cleaning"
+author: "Niklas Pawelzik"
+date: "2024-06-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# import basic packages
+
+```{r import packages}
+# Define required packages
+packages <- c(
+  "tidyverse",
+  "sf",
+  "giscoR",
+  "rmapshaper",
+  "rnaturalearth",
+  "rnaturalearthhires",
+  "maps",
+  "tidygeocoder",
+  "spdep",
+  "GGally",
+  "scales",
+  "RColorBrewer",
+  "viridis",
+  "cols4all",
+  "did",
+  "synthdid",
+  "fixest",
+  "plm",
+  "sandwich",
+  "lmtest",
+  "eurostat",
+  "httr",
+  "xml2",
+  "knitr",
+  "kableExtra",
+  "zoo",
+  "readxl"
+)
+
+# Install any that are missing
+missing <- setdiff(packages, rownames(installed.packages()))
+if (length(missing)) install.packages(missing, quiet = TRUE)
+
+# Load all packages quietly, suppress startup messages and output
+invisible(suppressPackageStartupMessages(
+  lapply(packages, library, character.only = TRUE)
+))
+
+```
+
+# define functions for initial data cleaning 
+
+```{r function to extract info on hospital and POC}
+extract_standortdaten <- function(element) {
+  standort_node <- xml_find_first(
+    element,
+    xpath = "//Standortkontaktdaten"
+  )
+  # Falls der erste Node nicht gefunden wird, versuche den zweiten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhauskontaktdaten")
+  }
+  # Falls weder der erste noch der zweite Node gefunden wird, versuche den dritten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhaus/Kontaktdaten")
+  }
+  # Für 2008 und 2010 alterantive Node-Struktur
+  if (is.na(standort_node)) {
+    institutionskennzeichen_node <- xml_find_first(element, xpath = "//Institutionskennzeichen")
+    krankenhausname_node <- xml_find_first(element, xpath = "//Krankenhaus_Name")
+  }
+  # Für 2008 und 2010 alterantive Node-Struktur
+  kontaktdaten_node <- xml_find_first(
+    element,
+    xpath = "//Kontaktdaten"
+  )
+  # For some years, xpath "Krankenhauskontaktdaten" is needed in addition to "Standortkontaktdaten"
+  krankenhauskontaktdaten_node <- xml_find_first(
+    element,
+    xpath = "//Krankenhauskontaktdaten"
+  )
+  datensatz_node <- xml_find_first(
+    element,
+    xpath = "//Datensatz"
+  )
+  krankenhaustraeger_node <- xml_find_first(
+    element,
+    xpath = "//Krankenhaustraeger"
+  )
+  verantwortlicher_node <- xml_find_first(
+    element,
+    xpath = "//Verantwortlicher_Erstellung"
+  )
+
+
+
+  name <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Name")
+  )
+  if (is.na(name)) {
+    name <- xml_text(
+    krankenhausname_node
+    )
+  }
+  ik_nodes <- xml_find_all(standort_node, ".//IK")
+  ik <- paste(xml_text(ik_nodes), collapse = ", ")
+  if (ik == "") {
+    ik_nodes <- xml_find_all(institutionskennzeichen_node, ".//IK")
+    ik <- paste(xml_text(ik_nodes), collapse = ", ")
+  }
+  datum <- xml_text(
+    datensatz_node %>%
+      xml_find_first(".//Datum")
+  )
+  standortnummer <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer")
+  )
+    if (is.na(standortnummer)) {
+    standortnummer <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer")
+    )
+  }
+  standortnummer_alt <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer_alt")
+  )
+    if (is.na(standortnummer_alt)) {
+    standortnummer_alt <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer_alt")
+    )
+  }
+  strasse <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Kontakt_Zugang/Strasse")
+  )
+    if (is.na(strasse)) {
+    strasse <- xml_text(
+    kontaktdaten_node %>%
+      xml_find_first(".//Hausanschrift/Strasse")
+    )
+  }
+  hausnummer <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Kontakt_Zugang/Hausnummer")
+  )
+    if (is.na(hausnummer)) {
+    hausnummer <- xml_text(
+    kontaktdaten_node %>%
+      xml_find_first(".//Hausanschrift/Hausnummer")
+    )
+  }
+  postleitzahl <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Kontakt_Zugang/Postleitzahl")
+  )
+    if (is.na(postleitzahl)) {
+    postleitzahl <- xml_text(
+    kontaktdaten_node %>%
+      xml_find_first(".//Hausanschrift/Postleitzahl")
+    )
+  }
+  ort <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Kontakt_Zugang/Ort")
+  )
+    if (is.na(ort)) {
+    ort <- xml_text(
+    kontaktdaten_node %>%
+      xml_find_first(".//Hausanschrift/Ort")
+    )
+  }
+  url_zugang <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Kontakt_Zugang/URL_Zugang")
+  )
+  if (is.na(url_zugang)) {
+    url_zugang <- xml_text(
+    kontaktdaten_node %>%
+      xml_find_first(".//URL")
+    )
+  }
+  if (is.na(url_zugang)) {
+    url_zugang <- xml_text(
+    krankenhauskontaktdaten_node %>%
+      xml_find_first(".//Kontakt_Zugang/URL_Zugang")
+    )
+  }
+  if (is.na(url_zugang)) {
+    url_zugang <- xml_text(
+    element %>%
+      xml_find_first(".//URL")
+    )
+  }
+  traegerart <- xml_text(
+    krankenhaustraeger_node %>%
+      xml_find_first(".//Krankenhaustraeger_Art/Art")
+  )
+  if (is.na(traegerart)) {
+    traegerart <- xml_text(
+    krankenhaustraeger_node %>%
+      xml_find_first(".//Krankenhaustraeger_Art/Sonstiges")
+    )
+  }
+  traegername <- xml_text(
+    krankenhaustraeger_node %>%
+      xml_find_first(".//Name")
+  )
+  vorname <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Vorname")
+  )
+  nachname <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Nachname")
+  )
+  funktion <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Funktion_Arbeitsschwerpunkt")
+  )
+  telefon_vorwahl <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Telefon/Vorwahl")
+  )
+  telefon_rufnummer <- xml_text(
+    verantwortlicher_node %>%
+       xml_find_first(".//Telefon/Rufnummer")
+  )
+  telefon_durchwahl <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Telefon/Durchwahl")
+  )
+  fax_vorwahl <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Fax/Vorwahl")
+  )
+  fax_rufnummer <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Fax/Rufnummer")
+  )
+  fax_durchwahl <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Fax/Durchwahl")
+  )
+  email <- xml_text(
+    verantwortlicher_node %>%
+      xml_find_first(".//Email")
+  )
+
+
+  data.frame(
+    Name = name,
+    Datum = datum,
+    IK_Institutionskennzeichen = ik,
+    Standortnummer = standortnummer,
+    Standortnummer_alt = standortnummer_alt,
+    Adresse = paste(
+      strasse,
+      hausnummer,
+      postleitzahl,
+      ort,
+      sep = ", "
+    ),
+    Strasse = strasse,
+    Hausnummer = hausnummer,
+    Postleitzahl = postleitzahl,
+    Ort = ort,
+    URL_Zugang = url_zugang,
+    Traegername = traegername,
+    Traegerart = traegerart,
+    POC_Vorname = vorname,
+    POC_Nachname = nachname,
+    POC_Funktion_Arbeitsschwerpunkt = funktion,
+    POC_Telefon_Vorwahl = telefon_vorwahl,
+    POC_Telefon_Rufnummer = telefon_rufnummer,
+    POC_Telefon_Durchwahl = telefon_durchwahl,
+    POC_Fax_Vorwahl = fax_vorwahl,
+    POC_Fax_Rufnummer = fax_rufnummer,
+    POC_Fax_Durchwahl = fax_durchwahl,
+    POC_Email = email
+  )
+}
+
+```
+
+```{r function to extract info on hospital beds and cases}
+extract_fallzahlen_bettzahlen <- function(element) {
+  standort_node <- xml_find_first(
+    element,
+    xpath = "//Standortkontaktdaten"
+  )
+  # Falls der erste Node nicht gefunden wird, versuche den zweiten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhauskontaktdaten")
+  }
+  # Falls weder der erste noch der zweite Node gefunden wird, versuche den dritten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhaus/Kontaktdaten")
+  }
+  # Für 2008 und 2010 alterantive Node-Struktur
+  if (is.na(standort_node)) {
+    institutionskennzeichen_node <- xml_find_first(element, xpath = "//Institutionskennzeichen")
+    krankenhausname_node <- xml_find_first(element, xpath = "//Krankenhaus_Name")
+  }
+  # Für 2008 und 2010 alterantive Node-Struktur
+  kontaktdaten_node <- xml_find_first(
+    element,
+    xpath = "//Kontaktdaten"
+  )
+  # For some years, xpath "Krankenhauskontaktdaten" is needed in addition to "Standortkontaktdaten"
+  krankenhauskontaktdaten_node <- xml_find_first(
+    element,
+    xpath = "//Krankenhauskontaktdaten"
+  )
+  datensatz_node <- xml_find_first(
+    element,
+    xpath = "//Datensatz"
+  )
+  fallzahlen_node <- xml_find_first(
+    element,
+    xpath = "//Fallzahlen"
+  )
+  betten_node <- xml_find_first(
+    element,
+    xpath = "//Anzahl_Betten"
+  )
+
+  
+  
+  name <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Name")
+  )
+  if (is.na(name)) {
+    name <- xml_text(
+    krankenhausname_node
+    )
+  }
+  ik_nodes <- xml_find_all(standort_node, ".//IK")
+  ik <- paste(xml_text(ik_nodes), collapse = ", ")
+  if (ik == "") {
+    ik_nodes <- xml_find_all(institutionskennzeichen_node, ".//IK")
+    ik <- paste(xml_text(ik_nodes), collapse = ", ")
+  }
+  datum <- xml_text(
+    datensatz_node %>%
+      xml_find_first(".//Datum")
+  )
+  standortnummer <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer")
+  )
+    if (is.na(standortnummer)) {
+    standortnummer <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer")
+    )
+  }
+  standortnummer_alt <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer_alt")
+  )
+    if (is.na(standortnummer_alt)) {
+    standortnummer_alt <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer_alt")
+    )
+  }
+  vollstationaere_fallzahl <- xml_text(
+    fallzahlen_node %>%
+      xml_find_first(".//Vollstationaere_Fallzahl")
+  )
+  teilstationaere_fallzahl <- xml_text(
+    fallzahlen_node %>%
+      xml_find_first(".//Teilstationaere_Fallzahl")
+  )
+  ambulante_fallzahl <- xml_text(
+    fallzahlen_node %>%
+      xml_find_first(".//Ambulante_Fallzahl")
+  )
+  staeb_fallzahl <- xml_text(
+    fallzahlen_node %>%
+      xml_find_first(".//StaeB_Fallzahl")
+  )
+  bettenzahl <- xml_text(
+    betten_node
+  )
+
+  # Erstelle den Dataframe "df_KH_QB_info_fallzahlen_und_betten"
+  data.frame(
+    Name = name,
+    Datum = datum,
+    IK_Institutionskennzeichen = ik,
+    Standortnummer = standortnummer,
+    Standortnummer_alt = standortnummer_alt,
+    Bettenzahl = bettenzahl,
+    Vollstationaere_Fallzahl = vollstationaere_fallzahl,
+    Teilstationaere_Fallzahl = teilstationaere_fallzahl,
+    Ambulante_Fallzahl = ambulante_fallzahl,
+    StaeB_Fallzahl = staeb_fallzahl
+  )
+}
+
+```
+
+```{r function to extract info on hospital staff}
+extract_personal <- function(element) {
+# FIRST: defining main nodes
+  standort_node <- xml_find_first(
+    element,
+    xpath = "//Standortkontaktdaten"
+  )
+  # Falls der erste Node nicht gefunden wird, versuche den zweiten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhauskontaktdaten")
+  }
+  # Falls weder der erste noch der zweite Node gefunden wird, versuche den dritten XPath
+  if (is.na(standort_node)) {
+    standort_node <- xml_find_first(element, xpath = "//Krankenhaus/Kontaktdaten")
+  }
+  # Für 2008 und 2010 alterantive Node-Struktur
+  if (is.na(standort_node)) {
+    institutionskennzeichen_node <- xml_find_first(element, xpath = "//Institutionskennzeichen")
+    krankenhausname_node <- xml_find_first(element, xpath = "//Krankenhaus_Name")
+  }
+
+  datensatz_node <- xml_find_first(
+    element,
+    xpath = "//Datensatz"
+  )
+  tarifliche_wochenarbeitszeit_node <- xml_find_first(
+    element,
+    xpath = "//Massgebliche_tarifliche_Wochenarbeitszeit"
+  )
+  aerzte_ohne_beleg_node <- xml_find_first(
+    element,
+    xpath = "//Aerzte_ohne_Belegaerzte/Personalerfassung"
+  )
+  facharzt_ohne_beleg_node <- xml_find_first(
+    element,
+    xpath = "//Aerzte_ohne_Belegaerzte/Fachaerzte"
+  )
+  aerzte_beleg_node <- xml_find_first(
+    element,
+    xpath = "//Belegaerzte"
+  )
+  aerzte_ohne_fachabteilungszuordnung_node <- xml_find_first(
+    element,
+    xpath = "//Aerzte_ohne_Fachabteilungszuordnung/Personalerfassung"
+  )
+  fa_ohne_fachabteilungszuordnung_node <- xml_find_first(
+    element,
+    xpath = "//Aerzte_ohne_Fachabteilungszuordnung/Fachaerzte/Personalerfassung"
+  )
+  gesundheits_krankenpfleger_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Gesundheits_Krankenpfleger/Personalerfassung"
+  )
+  gesundheits_krankenpfleger_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Gesundheits_Krankenpfleger/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  gesundheits_kinderkrankenpfleger_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Gesundheits_Kinderkrankenpfleger/Personalerfassung"
+  )
+  gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Gesundheits_Krankenpfleger/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  altenpfleger_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Altenpfleger/Personalerfassung"
+  )
+  altenpfleger_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Altenpfleger/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  pflegeassistenten_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Pflegeassistenten/Personalerfassung"
+  )
+  pflegeassistenten_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Pflegeassistenten/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  krankenpflegehelfer_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Krankenpflegehelfer/Personalerfassung"
+  )
+  krankenpflegehelfer_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Krankenpflegehelfer/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  pflegehelfer_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Pflegehelfer/Personalerfassung"
+  )
+  pflegehelfer_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Pflegehelfer/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  hebammen_entbindungspfleger_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Hebammen_Entbindungspfleger/Personalerfassung"
+  )
+  hebammen_entbindungspfleger_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Hebammen_Entbindungspfleger/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  operationstechnische_assistenz_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Operationstechnische_Assistenz/Personalerfassung"
+  )
+  operationstechnische_assistenz_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Operationstechnische_Assistenz/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+  medizinische_fachangestellte_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Medizinische_Fachangestellte/Personalerfassung"
+  )
+  medizinische_fachangestellte_ohne_fachabteilung_node <- xml_find_first(
+    element,
+    xpath = "//Pflegekraefte/Medizinische_Fachangestellte/Personalerfassung_ohne_Fachabteilungszuordnung"
+  )
+
+
+
+    # SECOND: defining specific nodes and extracting data
+  name <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Name")
+  )
+  if (is.na(name)) {
+    name <- xml_text(
+    krankenhausname_node
+    )
+  }
+  ik <- xml_text(
+    standort_node %>%
+      xml_find_first(".//IK")
+  )
+  if (is.na(ik)) {
+    ik <- xml_text(
+    institutionskennzeichen_node %>%
+    xml_find_first(".//IK"))
+  }
+  datum <- xml_text(
+    datensatz_node %>%
+      xml_find_first(".//Datum")
+  )
+  standortnummer <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer")
+  )
+    if (is.na(standortnummer)) {
+    standortnummer <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer")
+    )
+  }
+  standortnummer_alt <- xml_text(
+    standort_node %>%
+      xml_find_first(".//Standortnummer_alt")
+  )
+    if (is.na(standortnummer_alt)) {
+    standortnummer_alt <- xml_text(
+    element %>%
+      xml_find_first(".//Standortnummer_alt")
+    )
+  }
+  tarifliche_wochenarbeitszeit <- xml_text(
+    tarifliche_wochenarbeitszeit_node
+  )
+  anzahl_vk_ohne_beleg <- xml_text(
+    aerzte_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+    if (is.na(anzahl_vk_ohne_beleg)) {
+    anzahl_vk_ohne_beleg <- xml_text(
+    element %>%
+      xml_find_first(".//Personal_des_Krankenhauses/Aerzte/Aerzte_ohne_Belegaerzte/Anzahl")
+    )
+    }
+  anzahl_vk_mit_direktem_bv_ohne_beleg <- xml_text(
+    aerzte_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_ohne_direktem_bv_ohne_beleg <- xml_text(
+    aerzte_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_ambulante_versorgung_ohne_beleg <- xml_text(
+    aerzte_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_stationaere_versorgung_ohne_beleg <- xml_text(
+    aerzte_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ohne_beleg <- xml_text(
+    facharzt_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Personalerfassung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_mit_direktem_bv_ohne_beleg <- xml_text(
+    facharzt_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Personalerfassung/Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ohne_direktem_bv_ohne_beleg <- xml_text(
+    facharzt_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Personalerfassung/Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ambulante_versorgung_ohne_beleg <- xml_text(
+    facharzt_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Personalerfassung/Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_stationaere_versorgung_ohne_beleg <- xml_text(
+    facharzt_ohne_beleg_node %>%
+      xml_find_first(
+        ".//Personalerfassung/Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_beleg <- xml_text(
+    aerzte_beleg_node %>%
+      xml_find_first(
+        ".//Anzahl"
+      )
+  )
+  anzahl_vk_aerzte_ohne_fachabteilungszuordnung <- xml_text(
+    aerzte_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_mit_direktem_bv_aerzte_ohne_fachabteilungszuordnung <- xml_text(
+    aerzte_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_ohne_direktem_bv_aerzte_ohne_fachabteilungszuordnung <- xml_text(
+    aerzte_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_ambulante_versorgung_aerzte_ohne_fachabteilungszuordnung <- xml_text(
+    aerzte_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_stationaere_versorgung_aerzte_ohne_fachabteilungszuordnung <- xml_text(
+    aerzte_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ohne_fachabteilungszuordnung <- xml_text(
+    fa_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_mit_direktem_bv_ohne_fachabteilungszuordnung <- xml_text(
+    fa_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ohne_direktem_bv_ohne_fachabteilungszuordnung <- xml_text(
+    fa_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_ambulante_versorgung_ohne_fachabteilungszuordnung <- xml_text(
+    fa_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_fa_stationaere_versorgung_ohne_fachabteilungszuordnung <- xml_text(
+    fa_ohne_fachabteilungszuordnung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger <- xml_text(
+    gesundheits_krankenpfleger_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+    if (is.na(anzahl_vk_gesundheits_krankenpfleger)) {
+    anzahl_vk_gesundheits_krankenpfleger <- xml_text(
+    element %>%
+      xml_find_first(".//Personal_des_Krankenhauses/Pflegekraefte/Gesundheits_Krankenpfleger/Anzahl")
+    )
+    }  
+  anzahl_vk_gesundheits_krankenpfleger_mit_direktem_bv <- xml_text(
+    gesundheits_krankenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_ohne_direktem_bv <- xml_text(
+    gesundheits_krankenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_ambulante_versorgung <- xml_text(
+    gesundheits_krankenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_stationaere_versorgung <- xml_text(
+    gesundheits_krankenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_ohne_fachabteilung <- xml_text(
+    gesundheits_krankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    gesundheits_krankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    gesundheits_krankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    gesundheits_krankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_krankenpfleger_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    gesundheits_krankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger <- xml_text(
+    gesundheits_kinderkrankenpfleger_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_mit_direktem_bv <- xml_text(
+    gesundheits_kinderkrankenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_direktem_bv <- xml_text(
+    gesundheits_kinderkrankenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_ambulante_versorgung <- xml_text(
+    gesundheits_kinderkrankenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_stationaere_versorgung <- xml_text(
+    gesundheits_kinderkrankenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_fachabteilung <- xml_text(
+    gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_gesundheits_kinderkrankenpfleger_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    gesundheits_kinderkrankenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger <- xml_text(
+    altenpfleger_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_mit_direktem_bv <- xml_text(
+    altenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_ohne_direktem_bv <- xml_text(
+    altenpfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_ambulante_versorgung <- xml_text(
+    altenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_stationaere_versorgung <- xml_text(
+    altenpfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_ohne_fachabteilung <- xml_text(
+    altenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    altenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    altenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    altenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_altenpfleger_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    altenpfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten <- xml_text(
+    pflegeassistenten_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_mit_direktem_bv <- xml_text(
+    pflegeassistenten_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_ohne_direktem_bv <- xml_text(
+    pflegeassistenten_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_ambulante_versorgung <- xml_text(
+    pflegeassistenten_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_stationaere_versorgung <- xml_text(
+    pflegeassistenten_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_ohne_fachabteilung <- xml_text(
+    pflegeassistenten_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    pflegeassistenten_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    pflegeassistenten_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    pflegeassistenten_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegeassistenten_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    pflegeassistenten_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer <- xml_text(
+    krankenpflegehelfer_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_mit_direktem_bv <- xml_text(
+    krankenpflegehelfer_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_ohne_direktem_bv <- xml_text(
+    krankenpflegehelfer_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_ambulante_versorgung <- xml_text(
+    krankenpflegehelfer_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_stationaere_versorgung <- xml_text(
+    krankenpflegehelfer_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_ohne_fachabteilung <- xml_text(
+    krankenpflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    krankenpflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    krankenpflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    krankenpflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_krankenpflegehelfer_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    krankenpflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer <- xml_text(
+    pflegehelfer_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_mit_direktem_bv <- xml_text(
+    pflegehelfer_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_ohne_direktem_bv <- xml_text(
+    pflegehelfer_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_ambulante_versorgung <- xml_text(
+    pflegehelfer_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_stationaere_versorgung <- xml_text(
+    pflegehelfer_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_ohne_fachabteilung <- xml_text(
+    pflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    pflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    pflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    pflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_pflegehelfer_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    pflegehelfer_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger <- xml_text(
+    hebammen_entbindungspfleger_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_mit_direktem_bv <- xml_text(
+    hebammen_entbindungspfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_ohne_direktem_bv <- xml_text(
+    hebammen_entbindungspfleger_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_ambulante_versorgung <- xml_text(
+    hebammen_entbindungspfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_stationaere_versorgung <- xml_text(
+    hebammen_entbindungspfleger_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_ohne_fachabteilung <- xml_text(
+    hebammen_entbindungspfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    hebammen_entbindungspfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    hebammen_entbindungspfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    hebammen_entbindungspfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_hebammen_entbindungspfleger_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    hebammen_entbindungspfleger_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz <- xml_text(
+    operationstechnische_assistenz_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_mit_direktem_bv <- xml_text(
+    operationstechnische_assistenz_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_ohne_direktem_bv <- xml_text(
+    operationstechnische_assistenz_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_ambulante_versorgung <- xml_text(
+    operationstechnische_assistenz_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_stationaere_versorgung <- xml_text(
+    operationstechnische_assistenz_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_ohne_fachabteilung <- xml_text(
+    operationstechnische_assistenz_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    operationstechnische_assistenz_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    operationstechnische_assistenz_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    operationstechnische_assistenz_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_operationstechnische_assistenz_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    operationstechnische_assistenz_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte <- xml_text(
+    medizinische_fachangestellte_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_mit_direktem_bv <- xml_text(
+    medizinische_fachangestellte_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_ohne_direktem_bv <- xml_text(
+    medizinische_fachangestellte_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_ambulante_versorgung <- xml_text(
+    medizinische_fachangestellte_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_stationaere_versorgung <- xml_text(
+    medizinische_fachangestellte_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_ohne_fachabteilung <- xml_text(
+    medizinische_fachangestellte_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_mit_direktem_bv_ohne_fachabteilung <- xml_text(
+    medizinische_fachangestellte_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_mit_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_ohne_direktem_bv_ohne_fachabteilung <- xml_text(
+    medizinische_fachangestellte_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Beschaeftigungsverhaeltnis/Personal_ohne_direktem_BV/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_ambulante_versorgung_ohne_fachabteilung <- xml_text(
+    medizinische_fachangestellte_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Ambulante_Versorgung/Anzahl_VK"
+      )
+  )
+  anzahl_vk_medizinische_fachangestellte_stationaere_versorgung_ohne_fachabteilung <- xml_text(
+    medizinische_fachangestellte_ohne_fachabteilung_node %>%
+      xml_find_first(
+        ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
+      )
+  )
+
+
+    # THIRD: populating dataframe with extracted node data
+  data.frame(
+    Name = name,
+    Datum = datum,
+    IK_Institutionskennzeichen = ik,
+    Standortnummer = standortnummer,
+    Standortnummer_alt = standortnummer_alt,
+    Tarifliche_Wochenarbeitszeit = tarifliche_wochenarbeitszeit,
+    Anzahl_Aerzte_VK_ohne_beleg = anzahl_vk_ohne_beleg,
+    Anzahl_Aerzte_VK_Mit_direktem_BV_ohne_beleg = anzahl_vk_mit_direktem_bv_ohne_beleg,
+    Anzahl_Aerzte_VK_Ohne_direktem_BV_ohne_beleg = anzahl_vk_ohne_direktem_bv_ohne_beleg,
+    Anzahl_Aerzte_VK_Ambulante_Versorgung_ohne_beleg = anzahl_vk_ambulante_versorgung_ohne_beleg,
+    Anzahl_Aerzte_VK_Stationaere_Versorgung_ohne_beleg = anzahl_vk_stationaere_versorgung_ohne_beleg,
+    Anzahl_FA_VK_ohne_beleg = anzahl_vk_fa_ohne_beleg,
+    Anzahl_FA_VK_Mit_direktem_BV_ohne_beleg = anzahl_vk_fa_mit_direktem_bv_ohne_beleg,
+    Anzahl_FA_VK_Ohne_direktem_BV_ohne_beleg = anzahl_vk_fa_ohne_direktem_bv_ohne_beleg,
+    Anzahl_FA_VK_Ambulante_Versorgung_ohne_beleg = anzahl_vk_fa_ambulante_versorgung_ohne_beleg,
+    Anzahl_FA_VK_Stationaere_Versorgung_ohne_beleg = anzahl_vk_fa_stationaere_versorgung_ohne_beleg,
+    Anzahl_Aerzte_VK_beleg = anzahl_vk_beleg,
+    Anzahl_Aerzte_VK_ohne_fachabteilung = anzahl_vk_aerzte_ohne_fachabteilungszuordnung,
+    Anzahl_Aerzte_VK_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_mit_direktem_bv_aerzte_ohne_fachabteilungszuordnung,
+    Anzahl_Aerzte_VK_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_ohne_direktem_bv_aerzte_ohne_fachabteilungszuordnung,
+    Anzahl_Aerzte_VK_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_ambulante_versorgung_aerzte_ohne_fachabteilungszuordnung,
+    Anzahl_Aerzte_VK_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_stationaere_versorgung_aerzte_ohne_fachabteilungszuordnung,
+    Anzahl_FA_VK_ohne_fachabteilung = anzahl_vk_fa_ohne_fachabteilungszuordnung,
+    Anzahl_FA_VK_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_fa_mit_direktem_bv_ohne_fachabteilungszuordnung,
+    Anzahl_FA_VK_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_fa_ohne_direktem_bv_ohne_fachabteilungszuordnung,
+    Anzahl_FA_VK_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_fa_ambulante_versorgung_ohne_fachabteilungszuordnung,
+    Anzahl_FA_VK_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_fa_stationaere_versorgung_ohne_fachabteilungszuordnung,
+    Anzahl_VK_gesundheits_krankenpfleger = anzahl_vk_gesundheits_krankenpfleger,
+    Anzahl_VK_gesundheits_krankenpfleger_Mit_direktem_BV = anzahl_vk_gesundheits_krankenpfleger_mit_direktem_bv,
+    Anzahl_VK_gesundheits_krankenpfleger_Ohne_direktem_BV = anzahl_vk_gesundheits_krankenpfleger_ohne_direktem_bv,
+    Anzahl_VK_gesundheits_krankenpfleger_Ambulante_Versorgung = anzahl_vk_gesundheits_krankenpfleger_ambulante_versorgung,
+    Anzahl_VK_gesundheits_krankenpfleger_Stationaere_Versorgung = anzahl_vk_gesundheits_krankenpfleger_stationaere_versorgung,
+    Anzahl_VK_gesundheits_krankenpfleger_ohne_fachabteilung = anzahl_vk_gesundheits_krankenpfleger_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_krankenpfleger_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_gesundheits_krankenpfleger_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_krankenpfleger_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_gesundheits_krankenpfleger_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_krankenpfleger_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_gesundheits_krankenpfleger_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_krankenpfleger_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_gesundheits_krankenpfleger_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger = anzahl_vk_gesundheits_kinderkrankenpfleger,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Mit_direktem_BV = anzahl_vk_gesundheits_kinderkrankenpfleger_mit_direktem_bv,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Ohne_direktem_BV = anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_direktem_bv,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Ambulante_Versorgung = anzahl_vk_gesundheits_kinderkrankenpfleger_ambulante_versorgung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Stationaere_Versorgung = anzahl_vk_gesundheits_kinderkrankenpfleger_stationaere_versorgung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_ohne_fachabteilung = anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_gesundheits_kinderkrankenpfleger_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_gesundheits_kinderkrankenpfleger_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_gesundheits_kinderkrankenpfleger_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_gesundheits_kinderkrankenpfleger_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_gesundheits_kinderkrankenpfleger_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_altenpfleger = anzahl_vk_altenpfleger,
+    Anzahl_VK_altenpfleger_Mit_direktem_BV = anzahl_vk_altenpfleger_mit_direktem_bv,
+    Anzahl_VK_altenpfleger_Ohne_direktem_BV = anzahl_vk_altenpfleger_ohne_direktem_bv,
+    Anzahl_VK_altenpfleger_Ambulante_Versorgung = anzahl_vk_altenpfleger_ambulante_versorgung,
+    Anzahl_VK_altenpfleger_Stationaere_Versorgung = anzahl_vk_altenpfleger_stationaere_versorgung,
+    Anzahl_VK_altenpfleger_ohne_fachabteilung = anzahl_vk_altenpfleger_ohne_fachabteilung,
+    Anzahl_VK_altenpfleger_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_altenpfleger_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_altenpfleger_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_altenpfleger_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_altenpfleger_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_altenpfleger_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_altenpfleger_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_altenpfleger_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_pflegeassistenten = anzahl_vk_pflegeassistenten,
+    Anzahl_VK_pflegeassistenten_Mit_direktem_BV = anzahl_vk_pflegeassistenten_mit_direktem_bv,
+    Anzahl_VK_pflegeassistenten_Ohne_direktem_BV = anzahl_vk_pflegeassistenten_ohne_direktem_bv,
+    Anzahl_VK_pflegeassistenten_Ambulante_Versorgung = anzahl_vk_pflegeassistenten_ambulante_versorgung,
+    Anzahl_VK_pflegeassistenten_Stationaere_Versorgung = anzahl_vk_pflegeassistenten_stationaere_versorgung,
+    Anzahl_VK_pflegeassistenten_ohne_fachabteilung = anzahl_vk_pflegeassistenten_ohne_fachabteilung,
+    Anzahl_VK_pflegeassistenten_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_pflegeassistenten_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_pflegeassistenten_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_pflegeassistenten_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_pflegeassistenten_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_pflegeassistenten_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_pflegeassistenten_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_pflegeassistenten_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_krankenpflegehelfer = anzahl_vk_krankenpflegehelfer,
+    Anzahl_VK_krankenpflegehelfer_Mit_direktem_BV = anzahl_vk_krankenpflegehelfer_mit_direktem_bv,
+    Anzahl_VK_krankenpflegehelfer_Ohne_direktem_BV = anzahl_vk_krankenpflegehelfer_ohne_direktem_bv,
+    Anzahl_VK_krankenpflegehelfer_Ambulante_Versorgung = anzahl_vk_krankenpflegehelfer_ambulante_versorgung,
+    Anzahl_VK_krankenpflegehelfer_Stationaere_Versorgung = anzahl_vk_krankenpflegehelfer_stationaere_versorgung,
+    Anzahl_VK_krankenpflegehelfer_ohne_fachabteilung = anzahl_vk_krankenpflegehelfer_ohne_fachabteilung,
+    Anzahl_VK_krankenpflegehelfer_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_krankenpflegehelfer_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_krankenpflegehelfer_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_krankenpflegehelfer_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_krankenpflegehelfer_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_krankenpflegehelfer_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_krankenpflegehelfer_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_krankenpflegehelfer_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_pflegehelfer = anzahl_vk_pflegehelfer,
+    Anzahl_VK_pflegehelfer_Mit_direktem_BV = anzahl_vk_pflegehelfer_mit_direktem_bv,
+    Anzahl_VK_pflegehelfer_Ohne_direktem_BV = anzahl_vk_pflegehelfer_ohne_direktem_bv,
+    Anzahl_VK_pflegehelfer_Ambulante_Versorgung = anzahl_vk_pflegehelfer_ambulante_versorgung,
+    Anzahl_VK_pflegehelfer_Stationaere_Versorgung = anzahl_vk_pflegehelfer_stationaere_versorgung,
+    Anzahl_VK_pflegehelfer_ohne_fachabteilung = anzahl_vk_pflegehelfer_ohne_fachabteilung,
+    Anzahl_VK_pflegehelfer_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_pflegehelfer_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_pflegehelfer_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_pflegehelfer_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_pflegehelfer_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_pflegehelfer_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_pflegehelfer_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_pflegehelfer_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_hebammen_entbindungspfleger = anzahl_vk_hebammen_entbindungspfleger,
+    Anzahl_VK_hebammen_entbindungspfleger_Mit_direktem_BV = anzahl_vk_hebammen_entbindungspfleger_mit_direktem_bv,
+    Anzahl_VK_hebammen_entbindungspfleger_Ohne_direktem_BV = anzahl_vk_hebammen_entbindungspfleger_ohne_direktem_bv,
+    Anzahl_VK_hebammen_entbindungspfleger_Ambulante_Versorgung = anzahl_vk_hebammen_entbindungspfleger_ambulante_versorgung,
+    Anzahl_VK_hebammen_entbindungspfleger_Stationaere_Versorgung = anzahl_vk_hebammen_entbindungspfleger_stationaere_versorgung,
+    Anzahl_VK_hebammen_entbindungspfleger_ohne_fachabteilung = anzahl_vk_hebammen_entbindungspfleger_ohne_fachabteilung,
+    Anzahl_VK_hebammen_entbindungspfleger_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_hebammen_entbindungspfleger_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_hebammen_entbindungspfleger_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_hebammen_entbindungspfleger_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_hebammen_entbindungspfleger_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_hebammen_entbindungspfleger_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_hebammen_entbindungspfleger_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_hebammen_entbindungspfleger_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_operationstechnische_assistenz = anzahl_vk_operationstechnische_assistenz,
+    Anzahl_VK_operationstechnische_assistenz_Mit_direktem_BV = anzahl_vk_operationstechnische_assistenz_mit_direktem_bv,
+    Anzahl_VK_operationstechnische_assistenz_Ohne_direktem_BV = anzahl_vk_operationstechnische_assistenz_ohne_direktem_bv,
+    Anzahl_VK_operationstechnische_assistenz_Ambulante_Versorgung = anzahl_vk_operationstechnische_assistenz_ambulante_versorgung,
+    Anzahl_VK_operationstechnische_assistenz_Stationaere_Versorgung = anzahl_vk_operationstechnische_assistenz_stationaere_versorgung,
+    Anzahl_VK_operationstechnische_assistenz_ohne_fachabteilung = anzahl_vk_operationstechnische_assistenz_ohne_fachabteilung,
+    Anzahl_VK_operationstechnische_assistenz_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_operationstechnische_assistenz_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_operationstechnische_assistenz_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_operationstechnische_assistenz_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_operationstechnische_assistenz_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_operationstechnische_assistenz_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_operationstechnische_assistenz_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_operationstechnische_assistenz_stationaere_versorgung_ohne_fachabteilung,
+    Anzahl_VK_medizinische_fachangestellte = anzahl_vk_medizinische_fachangestellte,
+    Anzahl_VK_medizinische_fachangestellte_Mit_direktem_BV = anzahl_vk_medizinische_fachangestellte_mit_direktem_bv,
+    Anzahl_VK_medizinische_fachangestellte_Ohne_direktem_BV = anzahl_vk_medizinische_fachangestellte_ohne_direktem_bv,
+    Anzahl_VK_medizinische_fachangestellte_Ambulante_Versorgung = anzahl_vk_medizinische_fachangestellte_ambulante_versorgung,
+    Anzahl_VK_medizinische_fachangestellte_Stationaere_Versorgung = anzahl_vk_medizinische_fachangestellte_stationaere_versorgung,
+    Anzahl_VK_medizinische_fachangestellte_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_ohne_fachabteilung,
+    Anzahl_VK_medizinische_fachangestellte_Mit_direktem_BV_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_mit_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_medizinische_fachangestellte_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_ohne_direktem_bv_ohne_fachabteilung,
+    Anzahl_VK_medizinische_fachangestellte_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_ambulante_versorgung_ohne_fachabteilung,
+    Anzahl_VK_medizinische_fachangestellte_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_stationaere_versorgung_ohne_fachabteilung
+)
+}
+```
+
+
+```{r function to plot NAs}
+plot_na_matrix <- function(df) {     
+  # Preparing the dataframe for heatmaps     
+  df_heat <- df %>%        
+    pivot_longer(cols = everything(),
+                 names_to = "x") %>%
+    group_by(x) %>%
+    mutate(y = row_number())
+  # Ensuring the order of columns is kept as it is
+  df_heat <- df_heat %>%
+    ungroup() %>%
+    mutate(x = factor(x,levels = colnames(df)))
+  # Plotting data
+  g <- ggplot(data = df_heat, aes(x=x, y=y, fill=value)) +
+    geom_tile() +
+    theme(legend.position = "none",
+          axis.title.y=element_blank(),
+          axis.text.y =element_blank(),
+          axis.ticks.y=element_blank(),
+          axis.title.x=element_blank(),
+          axis.text.x = element_text(angle = 90, hjust = 1))
+     # Returning the plot
+    g 
+}
+```
+
+# define functions for initial data cleaning 
+```{r cleaning function}
+process_and_clean_WK_file <- function(df) {
+  # Step 1: Identify the year-related columns (those that start with a four-digit year)
+  year_columns <- grep("^[0-9]{4}", names(df), value = TRUE)
+  
+  # Step 2: Convert year-related columns to character type to avoid conflicts during pivot
+  df[year_columns] <- lapply(df[year_columns], as.character)
+  
+  # Step 3: Reshape the data to long format
+  df_long <- df %>%
+    pivot_longer(cols = all_of(year_columns), 
+                 names_to = "Year_and_Statistic", 
+                 values_to = "Value") %>%
+    separate(Year_and_Statistic, into = c("Year", "Statistic"), sep = "\n")  # Split Year and Statistic
+  
+  # Step 4: Replace "k.A." with NA
+  df_long[df_long == "k.A."] <- NA
+  
+  # Step 5: Filter out rows where key columns are NA
+  df_filtered <- df_long %>%
+    filter(!(is.na(Kommune) & is.na(GKZ) & is.na(ARS) & is.na(Bundesland) & is.na(Landkreis) & is.na(Demografietyp)))
+    
+  # Step 6: Clean the 'Value' column to remove non-numeric characters (e.g., commas, spaces)
+  df_filtered$Value <- gsub("\\.(?=[0-9]{3}(,|$))", "", df_filtered$Value, perl = TRUE)  # Remove thousands separator
+  df_filtered$Value <- gsub(",", ".", df_filtered$Value)  # Replace commas with periods for decimals
+  df_filtered$Value <- gsub("[^0-9.-]", "", df_filtered$Value)  # Remove any characters except digits, periods, and negatives
+  
+  # Step 7: Convert 'Value' column to numeric type
+  df_filtered$Value <- as.numeric(df_filtered$Value) 
+  
+  return(df_filtered)
+}
+```
+
+```{r}
+# Function to convert long-format dataframe back into wide format
+convert_to_wide <- function(df_long) {
+  df_wide <- df_long %>%
+    pivot_wider(names_from = Statistic, values_from = Value)
+  
+  return(df_wide)
+}
+```
