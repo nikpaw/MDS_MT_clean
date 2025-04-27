@@ -1,6 +1,6 @@
 # Impact of Hospital Closures on Local Employment
 
-This repository accompanies the study **Hospital Closures and Their Local Labor Market Fallout: Estimating the Causal Impact on Employment in German Municipalities**, which examines the effects of hospital closures on local labor market outcomes in Germany between 2010 and 2020. 
+This repository accompanies the study **Hospital Closures and Their Local Labor Market Fallout: Estimating the Causal Impact on Employment in German Municipalities**, which examines the effects of hospital closures on local labor market outcomes in Germany between 2010 and 2020.
 
 The analysis applies state-of-the-art Difference-in-Differences (DiD) methodologies for staggered treatment timing [Callaway & Sant’Anna (2021)](https://doi.org/10.1016/j.jeconom.2020.12.001) and leverages a manually validated dataset of hospital closures.
 
@@ -8,17 +8,17 @@ It contains the full reproducible codebase, processed datasets, and output files
 
 ## Table of Contents
 
--    [Project Overview](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [Project Overview](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Folder Structure](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [Folder Structure](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [How to Reproduce the Results](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [How to Reproduce the Results](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Data Sources](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [Data Sources](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Software Requirements](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [Software Requirements](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [License](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
+-   [License](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
 ## Project Overview
 
@@ -26,11 +26,11 @@ This study investigates the causal effect of hospital closures on local labor ma
 
 Key features include:
 
--    Construction of a manually validated closure event database.
+-   Construction of a manually validated closure event database.
 
--    Robustness checks through placebo tests, subgroup analyses (by rurality and by gender), spillover assessments, and anticipation effect modeling.
+-   Robustness checks through placebo tests, subgroup analyses (by rurality and by gender), spillover assessments, and anticipation effect modeling.
 
--    Analysis of dynamic effects over extended post-closure periods.
+-   Analysis of dynamic effects over extended post-closure periods.
 
 Findings indicate persistent and statistically significant reductions in local employment following hospital closures, with no evidence of labor market recovery over the observed period.
 
@@ -71,18 +71,17 @@ Findings indicate persistent and statistically significant reductions in local e
 ├── LICENSE                   # Project license
 ├── README.md                 # Project overview and instructions
 ├── MDS_MT_clean.Rproj        # RStudio project file
-
 ```
 
 ## How to Reproduce the Results
 
 To reproduce the results, follow these steps:
 
-1.   Clone or download the repository.
+1.  Clone or download the repository.
 
-2.   Open the RStudio project (`MDS_MT_clean.Rproj`).
+2.  Open the RStudio project (`MDS_MT_clean.Rproj`).
 
-3.   Execute the master script for reproducibility:
+3.  Execute the master script for reproducibility:
 
 ```         
 source("00_master/00_master_run_reproducible.R") 
@@ -90,16 +89,15 @@ source("00_master/00_master_run_reproducible.R")
 
 This script will:
 
--    Install and load required R packages.
+-   Install and load required R packages.
 
--    Load validated, processed datasets.
+-   Load validated, processed datasets.
 
--    Merge data sources and define estimation samples.
+-   Merge data sources and define estimation samples.
 
--    Conduct DiD estimation and robustness checks.
+-   Conduct DiD estimation and robustness checks.
 
--    Generate outputs (reports, figures, tables).
-
+-   Generate outputs (reports, figures, tables).
 
 ### Full Rebuild from Raw Data (Under Development)
 
@@ -113,13 +111,13 @@ source("00_master/00_master_run_from_raw.R")
 
 ## Data Sources
 
--    German Federal Statistical Office (Statistisches Bundesamt)
+-   German Federal Statistical Office (Statistisches Bundesamt)
 
--    Krankenhausqualitätsberichte (Hospital Quality Reports)
+-   Krankenhausqualitätsberichte (Hospital Quality Reports)
 
 -   Krankenhausverzeichnis (Hospital Directory)
 
--    RegioStaR Municipality Classification System
+-   RegioStaR Municipality Classification System
 
 -   Wegweiser Kommune Employment Statistics
 
@@ -127,9 +125,9 @@ Closure events were cross-validated using multiple independent administrative re
 
 ## Software Requirements
 
--    R version 4.2.0 or higher.
+-   R version 4.2.0 or higher.
 
--    All required R packages are automatically installed via the setup script (`00_setup/00_setup_packages_paths_functions.R`).
+-   All required R packages are automatically installed via the setup script (`00_setup/00_setup_packages_paths_functions.R`).
 
 ## License
 
