@@ -33,12 +33,12 @@ Robustness checks include:
 
 ```
 ├── data/
-│   ├── raw/              # Raw source data (if available)
-│   ├── processed/        # Cleaned and processed datasets
+│   ├── raw/              # Raw source data (only for full rebuild)
+│   ├── processed/        # Cleaned and processed datasets (in case of full rebuild)
+│   ├── reproducible/     # Cleaned and processed datasets (for reproduction, recommended)
 ├── output/
 │   ├── reports/          # Rendered HTML reports
 │   ├── figures/          # Figures and plots
-│   ├── tables/           # Exported tables
 ├── R/
 │   ├── Scripts and RMarkdown files, ordered by execution (00_, 01_, 02_, 03_)
 ├── doc/
