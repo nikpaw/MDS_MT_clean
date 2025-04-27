@@ -1,4 +1,4 @@
-# Impact of Hospital Closures on Regional Employment
+# Hospital Closures and Their Local Labour Market Fallout
 
 This repository contains the full code, processed datasets, and output files for the empirical analysis examining the impact of hospital closures on municipal employment levels in Germany between 2010 and 2020. The analysis applies state-of-the-art Difference-in-Differences (DiD) methodologies for staggered treatment timing (Callaway & Sant’Anna, 2021) and leverages a manually validated dataset of hospital closures.
 
