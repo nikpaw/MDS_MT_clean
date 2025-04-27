@@ -354,12 +354,12 @@ display: none;
 
 <div id="impact-of-hospital-closures-on-regional-employment" class="section level1">
 <h1>Impact of Hospital Closures on Regional Employment</h1>
-<p>This repository contains the full reproducible code and data (where
-legally possible) for the project analyzing the impact of hospital
-closures on regional employment levels in Germany.</p>
-<p>The analysis applies advanced Difference-in-Differences methods with
-multiple time periods and staggered treatment adoption (Callaway &amp;
-Sant’Anna 2020).</p>
+<p>This repository contains the full reproducible code and data for the
+project analyzing the impact of hospital closures between 2010 and 2020
+on local employment levels in Germany.</p>
+<p>The analysis applies Difference-in-Differences methods with multiple
+time periods and staggered treatment adoption as developed by Callaway
+&amp; Sant’Anna.</p>
 <hr />
 <div id="table-of-contents" class="section level2">
 <h2>Table of Contents</h2>
@@ -370,7 +370,6 @@ Sant’Anna 2020).</p>
 Results</a></li>
 <li><a href="#data-sources">Data Sources</a></li>
 <li><a href="#software-requirements">Software Requirements</a></li>
-<li><a href="#project-authors">Project Authors</a></li>
 <li><a href="#license">License</a></li>
 </ul>
 <hr />
@@ -378,7 +377,7 @@ Results</a></li>
 <div id="project-overview" class="section level2">
 <h2>Project Overview</h2>
 <p>The study estimates causal effects of hospital closures at the
-municipality level on overall and female employment levels.</p>
+municipality level on employment levels.</p>
 <p>Robustness checks include: - Placebo tests - Subgroup analyses (urban
 vs rural areas, gender) - Spillover effects - Anticipation effects</p>
 <hr />
@@ -386,17 +385,35 @@ vs rural areas, gender) - Spillover effects - Anticipation effects</p>
 <div id="folder-structure" class="section level2">
 <h2>Folder Structure</h2>
 <pre><code>├── data/
-│   ├── raw/              # Raw source data (if available)
-│   ├── processed/        # Cleaned and processed datasets
+│   ├── raw/                  # Raw source data (only for full rebuild)
+│   ├── processed/            # Cleaned and processed datasets (created if running from raw)
+│   ├── reproducible/         # Final datasets for reproduction (recommended default)
+│   ├── supplementary_files/  # Manually added research or matching files
 ├── output/
-│   ├── reports/          # Rendered HTML reports
-│   ├── figures/          # Figures and plots
-│   ├── tables/           # Exported tables
-├── R/
-│   ├── Scripts and RMarkdown files, ordered by execution (00_, 01_, 02_, 03_)
-├── doc/
-│   ├── Documentation and supplementary files
-├── README.md</code></pre>
+│   ├── reports/              # Rendered HTML reports
+│   ├── figures/              # Figures and plots
+├── R/                        # Scripts and RMarkdown files
+│   ├── 00_1_master_run_reproducible.R
+│   ├── 00_2_alternative_master_run_from_raw.R
+│   ├── 00_download_raw_data.R
+│   ├── 00_load_packages_paths_functions.R
+│   ├── 01_geodata_load_and_clean.Rmd
+│   ├── 01_hospital_reports_load_and_clean_TBA.Rmd
+│   ├── 01_khv_load_and_clean.Rmd
+│   ├── 01_wk_download_and_clean.Rmd
+│   ├── 02_geodata_load_processed_data.Rmd
+│   ├── 02_hospital_reports_load_processed_data.Rmd
+│   ├── 02_khv_load_processed_data.Rmd
+│   ├── 02_wk_load_processed_data.Rmd
+│   ├── 03_1_merge_and_prepare_data.Rmd
+│   ├── 03_2_estimate_main_models.Rmd
+│   ├── 03_3_conduct_robustness_tests.Rmd
+├── doc/                      # (Optional) Other documentation (empty for now)
+├── .gitignore                 # Git version control ignore file
+├── LICENSE                    # Project license
+├── README.md                  # Project overview and instructions
+├── project_name.Rproj         # RStudio project file
+</code></pre>
 <hr />
 </div>
 <div id="how-to-reproduce-the-results" class="section level2">
@@ -415,7 +432,8 @@ robustness checks - Generate outputs (reports, figures, tables)</p>
 <p>If you have access to raw data and wish to reproduce every step from
 scratch:</p>
 <pre class="r"><code>source(&quot;R/00_2_alternative_master_run_from_raw.R&quot;)</code></pre>
-<p>(Note: This process is considerably more time-intensive.)</p>
+<p>(Note: This process is considerably more time-intensive and not
+recommended.)</p>
 <hr />
 </div>
 </div>
@@ -424,34 +442,24 @@ scratch:</p>
 <ul>
 <li>German Federal Statistical Office (Statistisches Bundesamt)</li>
 <li>Krankenhausverzeichnis (Hospital Directory)</li>
-<li>Hospital Quality Reports (Qualitätsberichte)</li>
-<li>Regional classification systems (RegioStaR)</li>
+<li>Hospital Quality Reports (Krankenhausqualitätsberichte)</li>
+<li>Regional classification system (RegioStaR)</li>
 <li>Employment statistics</li>
 </ul>
-<p>Some raw datasets cannot be publicly shared due to licensing
-restrictions. Where possible, processed datasets are provided.</p>
 <hr />
 </div>
 <div id="software-requirements" class="section level2">
 <h2>Software Requirements</h2>
 <ul>
 <li>R version 4.2.0 or higher</li>
-<li>R packages: tidyverse, sf, did, fixest, plm, here, knitr,
-kableExtra, and others (see R/00_load_packages.R for full list)</li>
+<li>see R/00_load_packages.R for full list of all required packages,
+packages are installed automatically.</li>
 </ul>
-<p>All required packages are installed automatically.</p>
-<hr />
-</div>
-<div id="project-authors" class="section level2">
-<h2>Project Authors</h2>
-<p><strong>Niklas Pawelzik</strong><br />
-(Lead Researcher and Author)</p>
 <hr />
 </div>
 <div id="license" class="section level2">
 <h2>License</h2>
-<p>This repository is licensed under the MIT License unless otherwise
-specified.</p>
+<p>Licensed under the MIT License</p>
 </div>
 </div>
 

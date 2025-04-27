@@ -33,17 +33,35 @@ Robustness checks include:
 
 ```
 ├── data/
-│   ├── raw/              # Raw source data (only for full rebuild)
-│   ├── processed/        # Cleaned and processed datasets (in case of full rebuild)
-│   ├── reproducible/     # Cleaned and processed datasets (for reproduction, recommended)
+│   ├── raw/                  # Raw source data (only for full rebuild)
+│   ├── processed/            # Cleaned and processed datasets (created if running from raw)
+│   ├── reproducible/         # Final datasets for reproduction (recommended default)
+│   ├── supplementary_files/  # Manually added research or matching files
 ├── output/
-│   ├── reports/          # Rendered HTML reports
-│   ├── figures/          # Figures and plots
-├── R/
-│   ├── Scripts and RMarkdown files, ordered by execution (00_, 01_, 02_, 03_)
-├── doc/
-│   ├── Documentation and supplementary files
-├── README.md
+│   ├── reports/              # Rendered HTML reports
+│   ├── figures/              # Figures and plots
+├── R/                        # Scripts and RMarkdown files
+│   ├── 00_1_master_run_reproducible.R
+│   ├── 00_2_alternative_master_run_from_raw.R
+│   ├── 00_download_raw_data.R
+│   ├── 00_load_packages_paths_functions.R
+│   ├── 01_geodata_load_and_clean.Rmd
+│   ├── 01_hospital_reports_load_and_clean_TBA.Rmd
+│   ├── 01_khv_load_and_clean.Rmd
+│   ├── 01_wk_download_and_clean.Rmd
+│   ├── 02_geodata_load_processed_data.Rmd
+│   ├── 02_hospital_reports_load_processed_data.Rmd
+│   ├── 02_khv_load_processed_data.Rmd
+│   ├── 02_wk_load_processed_data.Rmd
+│   ├── 03_1_merge_and_prepare_data.Rmd
+│   ├── 03_2_estimate_main_models.Rmd
+│   ├── 03_3_conduct_robustness_tests.Rmd
+├── doc/                       # Final paper
+├── .gitignore                 # Git version control ignore file
+├── LICENSE                    # Project license
+├── README.md                  # Project overview and instructions
+├── MDS_MT_clean.Rproj         # RStudio project file
+
 ```
 
 ---
@@ -65,9 +83,9 @@ This script will:
 - Run estimations and robustness checks
 - Generate outputs (reports, figures, tables)
 
-### Optional: Full Rebuild from Raw Data
+### Optional: Full Rebuild from Raw Data (under construction)
 
-If you have access to raw data and wish to reproduce every step from scratch:
+If you wish to reproduce every step from scratch starting from raw data:
 
 ```r
 source("R/00_2_alternative_master_run_from_raw.R")

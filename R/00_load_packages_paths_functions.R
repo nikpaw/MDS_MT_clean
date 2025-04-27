@@ -17,7 +17,7 @@ if (length(missing_packages) > 0) {
 # Load all packages
 invisible(lapply(required_packages, library, character.only = TRUE))
 
-cat("✅ All required packages loaded.\n\n")
+cat("All required packages loaded.\n\n")
 
 
 #### Defining Useful Paths ####
@@ -34,10 +34,10 @@ path_output_reports <- here::here("output", "reports")
 dir.create(path_output_figures, recursive = TRUE, showWarnings = FALSE)
 dir.create(path_output_reports, recursive = TRUE, showWarnings = FALSE)
 
-cat("✅ Output paths set and ensured.\n\n")
+cat("Output paths set and ensured.\n\n")
 
 
 #### Defining Helper Functions ####
 
 
-cat("✅ Helper functions ready.\n\n")
+cat("Helper functions ready.\n\n")
