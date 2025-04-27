@@ -2,9 +2,9 @@
 if (!requireNamespace("rmarkdown", quietly = TRUE)) install.packages("rmarkdown")
 
 required_packages <- c(
-  "tidyverse", "sf", "giscoR", "rmapshaper", "rnaturalearth", "rnaturalearthhires",
+  "tidyverse", "sf", "giscoR", "rmapshaper", "rnaturalearth",
   "maps", "tidygeocoder", "spdep", "GGally", "scales", "RColorBrewer", "viridis",
-  "cols4all", "did", "synthdid", "fixest", "plm", "sandwich", "lmtest",
+  "cols4all", "did", "fixest", "plm", "sandwich", "lmtest",
   "eurostat", "httr", "xml2", "knitr", "kableExtra", "zoo", "readxl", "here"
 )
 

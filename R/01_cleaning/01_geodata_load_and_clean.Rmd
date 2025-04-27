@@ -165,7 +165,7 @@ sf::st_write(shp_gemeinde, here::here(path_base_geodata_processed, "shp_gemeinde
 sf::st_write(df_regiostar_complete, here::here(path_base_geodata_processed, "df_regiostar_complete.gpkg"), delete_dsn = TRUE)
 sf::st_write(df_regiostar_geo, here::here(path_base_geodata_processed, "df_regiostar_geo.gpkg"), delete_dsn = TRUE)
 sf::st_write(df_states_geo, here::here(path_base_geodata_processed, "df_states_geo.gpkg"), delete_dsn = TRUE)
-sf::st_write(df_states_geo_simplified, here::here(path_base_geodata_processed, "df_states_geo_simplified.gpkg"), delete_dsn = TRUE)
+# sf::st_write(df_states_geo_simplified, here::here(path_base_geodata_processed, "df_states_geo_simplified.gpkg"), delete_dsn = TRUE)
 sf::st_write(df_internal_borders, here::here(path_base_geodata_processed, "df_internal_borders.gpkg"), delete_dsn = TRUE)
 sf::st_write(states_border_clean_sf, here::here(path_base_geodata_processed, "states_border_clean_sf.gpkg"), delete_dsn = TRUE)
 
