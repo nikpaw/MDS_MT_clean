@@ -1,5 +1,5 @@
 ---
-title: "Main Difference-in-Differences Estimations"
+title: "Estimation of Main Difference-in-Differences Models"
 output: html_document
 ---
 
@@ -108,14 +108,14 @@ plot_basic_DR <- ggplot2::ggplot(df_did_full_DR, ggplot2::aes(x = event.time, y 
 # Display the plot
 plot_basic_DR
 
-# Commented out: Save manually later
-# ggplot2::ggsave(
-#   filename = "images/plot_basic_dr.jpg",
-#   plot = plot_basic_DR,
-#   width = 8,
-#   height = 6,
-#   dpi = 300
-# )
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_basic_dr.jpg"),
+  plot = plot_basic_DR,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
 ```
 
@@ -260,13 +260,14 @@ plot_basic_OR <- ggplot2::ggplot(df_did_full_OR, ggplot2::aes(x = event.time, y 
 # Display the plot
 plot_basic_OR
 
-# Save the plot
-# ggplot2::ggsave(
-#   filename = "images/plot_basic_or.jpg",
-#   plot = plot_basic_OR,
-#   width = 8, height = 6,
-#   dpi = 300
-# )
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_basic_or.jpg"),
+  plot = plot_basic_OR,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
 ```
 
@@ -493,12 +494,14 @@ plot_dynamic_ATT_prematched <- ggplot2::ggplot(summary_dynamic_results, ggplot2:
 # Print
 plot_dynamic_ATT_prematched
 
-# Save
-# ggplot2::ggsave(
-#   "images/plot_dynamic_ATT_prematched.png",
-#   plot = plot_dynamic_ATT_prematched,
-#   width = 12, height = 5, dpi = 300
-# )
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_dynamic_ATT_prematched.png"),
+  plot = plot_dynamic_ATT_prematched,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
 ```
 ```{r}
@@ -605,13 +608,18 @@ plot_histogram_overall_ATT_prematched <- ggplot(att_overall_results, aes(x = att
 # Print plot
 plot_histogram_overall_ATT_prematched
 
-# Save the plot (commented out as per instruction)
-# ggsave("images/plot_overall_ATT_prematched.png",
-#        plot = plot_histogram_overall_ATT_prematched,
-#        width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_overall_ATT_prematched.png"),
+  plot = plot_histogram_overall_ATT_prematched,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
-# Step 5: Output LaTeX table (commented, manual use)
-# cat(knitr::kable(summary_table, format = "latex", booktabs = TRUE, caption = "Summary of ATT Estimates and Confidence Intervals"))
+
+# Output LaTeX table
+cat(knitr::kable(summary_table, format = "latex", booktabs = TRUE, caption = "Summary of ATT Estimates and Confidence Intervals"))
 
 ```
 # Combine Models into Facet Plot
@@ -725,8 +733,13 @@ plot_combined_models <- ggplot() +
 # Show plot
 plot_combined_models
 
-# --- Save plot (commented out for now) ---
-# ggsave("images/plot_combined_models_facet.png", plot_combined_models,
-#        width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_combined_models_facet.png"),
+  plot = plot_combined_models,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
 ```

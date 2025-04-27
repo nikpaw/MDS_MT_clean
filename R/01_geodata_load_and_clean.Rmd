@@ -1,5 +1,5 @@
 ---
-title: "Import and Prepare Geospatial and Regional Typology Data"
+title: "Geodata: Load and Clean Spatial Datasets"
 output: html_document
 ---
 

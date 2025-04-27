@@ -1,5 +1,5 @@
 ---
-title: "03_3_TBA"
+title: "Conduct Robustness and Validation Tests"
 output: html_document
 ---
 
@@ -7,7 +7,7 @@ output: html_document
 # Placebo Tests
 
 ```{r}
-set.seed(123)  # For reproducibility
+set.seed(123)
 
 # Step 1: Keep only never-treated units
 df_control_only <- df_CS_model_preparation %>%
@@ -167,9 +167,14 @@ plot_placebo_facet <- ggplot(df_placebo_combined, aes(x = event.time, y = estima
 
 plot_placebo_facet
 
-# Commented out: Saving the plot
-# ggsave("images/plot_placebo_facet.png",
-#        width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_placebo_facet.png"),
+  plot = plot_placebo_facet,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
 ```
 
@@ -274,8 +279,14 @@ plot_dynamic_ATT_female <- ggplot2::ggplot(
 # Display plot
 plot_dynamic_ATT_female
 
-# Optionally save manually
-# ggsave("images/plot_dynamic_att_female.png", plot_dynamic_ATT_female, width = 8, height = 6, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_dynamic_att_female.png"),
+  plot = plot_dynamic_ATT_female,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
 
 ```
 
@@ -577,8 +588,14 @@ plot_subgroups_dynamic_ATT_facet <- ggplot2::ggplot(
 # Print the plot
 plot_subgroups_dynamic_ATT_facet
 
-# Optionally save manually
-# ggsave("images/plot_subgroups_dynamic_ATT_facet.png", width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_subgroups_dynamic_ATT_facet.png"),
+  plot = plot_subgroups_dynamic_ATT_facet,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
 ```
 
@@ -720,9 +737,15 @@ plot_dynamic_ATT_anticipation <- ggplot(df_combined_models_test_anticipation,
 
 plot_dynamic_ATT_anticipation
 
-# Commented out saving the plot
-# ggsave("images/plot_dynamic_ATT_anticipation.png",
-#        width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_dynamic_ATT_anticipation.png"),
+  plot = plot_dynamic_ATT_anticipation,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
+
 
 ```
 
@@ -879,9 +902,13 @@ plot_spillover_comparison <- ggplot(df_combined_models_test_spillover,
 # Display the plot
 plot_spillover_comparison
 
-# Saving is commented out for now
-# ggsave("images/plot_spillover_comparison.png",
-#        width = 12, height = 5, dpi = 300)
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_spillover_comparison.png"),
+  plot = plot_spillover_comparison,
+  width = 12,
+  height = 5,
+  dpi = 300
+)
 
 ```
 

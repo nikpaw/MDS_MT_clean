@@ -1,5 +1,5 @@
 ---
-title: "Hospital Reports: Identify and Process Hospital Closures"
+title: "Hospital Reports: Load Processed Data"
 author: "Niklas Pawelzik"
 date: "2024-07-06"
 output: html_document

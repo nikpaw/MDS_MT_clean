@@ -1,5 +1,5 @@
 ---
-title: "Merging Datasets and Preparing Sample for Estimation"
+title: "Merge Data and Prepare Analytical Dataset"
 output: html_document
 ---
 
@@ -235,8 +235,11 @@ plot_hospital_closures_source_comparison <- ggplot2::ggplot(df_hospital_closure_
 # Print plot
 print(plot_hospital_closures_source_comparison)
 
-# Commented out: Save the plot manually later
-# ggplot2::ggsave("images/plot_hospital_closures_confirmed.png", width = 12, height = 5, dpi = 300)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_hospital_closures_confirmed.png"),
+  width = 12, height = 5, dpi = 300
+)
 ```
 
 ```{r summarize_closure_ratios}
@@ -404,12 +407,14 @@ plot_map_hospital_closures_municipality <- ggplot2::ggplot(data = df_plot_map_ho
     y = NULL
   )
 
-# Commented out: Save plot manually later
-# ggplot2::ggsave("images/plot_map_hospital_closures_confirmed_municipality_type.pdf",
-#   plot = plot_map_hospital_closures_municipality,
-#   device = cairo_pdf,
-#   width = 8, height = 6
-# )
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_map_hospital_closures_confirmed_municipality_type.pdf"),
+  plot = plot_map_hospital_closures_municipality,
+  device = cairo_pdf,
+  width = 8,
+  height = 6
+)
 
 # Display plot
 plot_map_hospital_closures_municipality
@@ -576,8 +581,14 @@ plot_map_treatment_spillover_municipality <- ggplot2::ggplot(
 # Print plot
 print(plot_map_treatment_spillover_municipality)
 
-# Commented out: Save manually later
-# ggplot2::ggsave("images/plot_map_treatment_spillover_control.pdf", plot = plot_map_treatment_spillover_municipality, width = 8, height = 6)
+# Save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_map_treatment_spillover_control.pdf"),
+  plot = plot_map_treatment_spillover_municipality,
+  width = 8,
+  height = 6
+)
+
 
 ```
 
@@ -833,12 +844,13 @@ plot_parallel_trends_complete <- ggplot2::ggplot() +
 # Print the plot
 plot_parallel_trends_complete
 
-# Commented out: Save manually later
-# ggplot2::ggsave(
-#   filename = "images/plot_parallel_trends.png",
-#   plot = plot_parallel_trends_complete,
-#   width = 8,
-#   height = 6,
-#   dpi = 300
-# )
+# save plot
+ggplot2::ggsave(
+  filename = file.path(path_output_figures, "plot_parallel_trends.png"),
+  plot = plot_parallel_trends_complete,
+  width = 8,
+  height = 6,
+  dpi = 300
+)
+
 ```
