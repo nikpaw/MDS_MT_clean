@@ -110,7 +110,7 @@ plot_basic_DR
 
 # Save plot
 ggplot2::ggsave(
-  filename = file.path(path_output_figures, "plot_basic_dr.jpg"),
+  filename = file.path(path_output_figures, "plot_basic_dr.png"),
   plot = plot_basic_DR,
   width = 8,
   height = 6,
@@ -262,7 +262,7 @@ plot_basic_OR
 
 # Save plot
 ggplot2::ggsave(
-  filename = file.path(path_output_figures, "plot_basic_or.jpg"),
+  filename = file.path(path_output_figures, "plot_basic_or.png"),
   plot = plot_basic_OR,
   width = 8,
   height = 6,
