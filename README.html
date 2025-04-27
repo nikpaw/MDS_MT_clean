@@ -352,15 +352,20 @@ display: none;
 </div>
 
 
-<div id="impact-of-hospital-closures-on-regional-employment" class="section level1">
-<h1>Impact of Hospital Closures on Regional Employment</h1>
-<p>This repository contains the full code, processed datasets, and
-output files for the empirical analysis examining the impact of hospital
-closures on municipal employment levels in Germany between 2010 and
-2020. The analysis applies state-of-the-art Difference-in-Differences
-(DiD) methodologies for staggered treatment timing (Callaway &amp;
-Sant’Anna, 2021) and leverages a manually validated dataset of hospital
-closures.</p>
+<div id="impact-of-hospital-closures-on-local-employment" class="section level1">
+<h1>Impact of Hospital Closures on Local Employment</h1>
+<p>This repository accompanies the study <strong>Hospital Closures and
+Their Local Labor Market Fallout: Estimating the Causal Impact on
+Employment in German Municipalities</strong>, which examines the effects
+of hospital closures on local labor market outcomes in Germany between
+2010 and 2020.</p>
+<p>The analysis applies state-of-the-art Difference-in-Differences (DiD)
+methodologies for staggered treatment timing <a href="https://doi.org/10.1016/j.jeconom.2020.12.001">Callaway &amp;
+Sant’Anna (2021)</a> and leverages a manually validated dataset of
+hospital closures.</p>
+<p>It contains the full reproducible codebase, processed datasets, and
+output files necessary to replicate the results presented in the
+paper.</p>
 <div id="table-of-contents" class="section level2">
 <h2>Table of Contents</h2>
 <ul>
@@ -400,15 +405,41 @@ labor market recovery over the observed period.</p>
 </div>
 <div id="folder-structure" class="section level2">
 <h2>Folder Structure</h2>
-<pre><code>├── data/ 
-│   ├── raw/                  # Raw source data (only for full rebuild, work in progress) 
-│   ├── processed/            # Cleaned and processed datasets (created if running from raw, work in progress) 
-│   ├── reproducible/         # Final datasets for reproduction (recommended default) │   
-├── supplementary_files/  # Manually added research or matching files 
-├── output/ │   
-├── reports/              # Rendered HTML reports 
-│   ├── figures/              # Figures and plots 
-├── R/                        # Scripts and RMarkdown files ├── 00_master/                # Scripts controlling project execution (master scripts) │   ├── 00_master_run_from_raw.R           # Master script for full rebuild from raw data (optional, work in progress) │   └── 00_master_run_reproducible.R        # Master script for reproducible setup (recommended default) ├── 00_setup/                 # Scripts setting up the environment (packages, paths, functions) │   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (optional, work in progress) │   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions (recommended default) ├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets │   ├── 01_geodata_load_and_clean.Rmd       # Load and clean geospatial data │   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data (work in progress) │   ├── 01_khv_load_and_clean.Rmd           # Load and clean KHV dataset │   └── 01_wk_download_and_clean.Rmd        # Download and clean Wegweiser Kommune data ├── 02_loading/               # RMarkdown scripts loading processed datasets for analysis │   ├── 02_geodata_load_processed_data.Rmd  # Load pre-cleaned geospatial data │   ├── 02_hospital_reports_load_processed_data.Rmd # Load pre-cleaned hospital report data │   ├── 02_khv_load_processed_data.Rmd      # Load pre-cleaned KHV data │   └── 02_wk_load_processed_data.Rmd       # Load pre-cleaned Wegweiser Kommune data ├── 03_analysis/              # Main data merging, modeling, estimation, and robustness tests │   ├── 03_1_merge_and_prepare_data.Rmd     # Merge datasets, define samples and variables │   ├── 03_2_estimate_main_models.Rmd       # Main model estimation │   └── 03_3_conduct_robustness_tests.Rmd   # Robustness checks and additional analyses ├── doc/                      # Final paper ├── .gitignore                # Git version control ignore file ├── LICENSE                   # Project license ├── README.md                 # Project overview and instructions ├── MDS_MT_clean.Rproj        # RStudio project file </code></pre>
+<pre><code>├── data/
+│   ├── raw/                  # Raw source data (only for full rebuild, work in progress)
+│   ├── processed/            # Cleaned and processed datasets (created if running from raw, work in progress)
+│   ├── reproducible/         # Final datasets for reproduction (recommended default)
+│   └── supplementary_files/  # Manually added research or matching files
+├── output/
+│   ├── reports/              # Rendered HTML reports
+│   └── figures/              # Figures and plots
+├── R/                        # Scripts and RMarkdown files
+├── 00_master/                # Scripts controlling project execution (master scripts)
+│   ├── 00_master_run_from_raw.R           # Master script for full rebuild from raw data (optional, work in progress)
+│   └── 00_master_run_reproducible.R        # Master script for reproducible setup (recommended default)
+├── 00_setup/                 # Scripts setting up the environment (packages, paths, functions)
+│   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (optional, work in progress)
+│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions (recommended default)
+├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets
+│   ├── 01_geodata_load_and_clean.Rmd       # Load and clean geospatial data
+│   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data (work in progress)
+│   ├── 01_khv_load_and_clean.Rmd           # Load and clean KHV dataset
+│   └── 01_wk_download_and_clean.Rmd        # Download and clean Wegweiser Kommune data
+├── 02_loading/               # RMarkdown scripts loading processed datasets for analysis
+│   ├── 02_geodata_load_processed_data.Rmd  # Load pre-cleaned geospatial data
+│   ├── 02_hospital_reports_load_processed_data.Rmd # Load pre-cleaned hospital report data
+│   ├── 02_khv_load_processed_data.Rmd      # Load pre-cleaned KHV data
+│   └── 02_wk_load_processed_data.Rmd       # Load pre-cleaned Wegweiser Kommune data
+├── 03_analysis/              # Main data merging, modeling, estimation, and robustness tests
+│   ├── 03_1_merge_and_prepare_data.Rmd     # Merge datasets, define samples and variables
+│   ├── 03_2_estimate_main_models.Rmd       # Main model estimation
+│   └── 03_3_conduct_robustness_tests.Rmd   # Robustness checks and additional analyses
+├── doc/                      # Final paper
+├── .gitignore                # Git version control ignore file
+├── LICENSE                   # Project license
+├── README.md                 # Project overview and instructions
+├── MDS_MT_clean.Rproj        # RStudio project file
+</code></pre>
 </div>
 <div id="how-to-reproduce-the-results" class="section level2">
 <h2>How to Reproduce the Results</h2>
@@ -427,7 +458,6 @@ labor market recovery over the observed period.</p>
 <li><p>Merge data sources and define estimation samples.</p></li>
 <li><p>Conduct DiD estimation and robustness checks.</p></li>
 <li><p>Generate outputs (reports, figures, tables).</p></li>
-<li></li>
 </ul>
 <div id="full-rebuild-from-raw-data-under-development" class="section level3">
 <h3>Full Rebuild from Raw Data (Under Development)</h3>
