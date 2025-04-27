@@ -8,7 +8,7 @@ zip_url <- "https://www.dropbox.com/scl/fi/ia32wnerdasw2bxmhe9lv/raw_data.zip?rl
 zip_path <- here::here("data", "raw_data.zip")
 
 # Define directory to unzip contents
-unzip_dir <- here::here("data")
+unzip_dir <- here::here("data", "raw")
 
 # Download and unzip if not already present
 if (!fs::file_exists(zip_path)) {

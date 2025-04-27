@@ -6,9 +6,6 @@ output: html_document
 ```{r}
 ### Load Processed Geodata from "reproducible" Folder
 
-# Set base path for reproducible geodata
-path_base_geodata_reproducible <- here::here("data", "reproducible", "geodata")
-
 # Load each geodata file individually
 shp_gemeinde <- sf::st_read(file.path(path_base_geodata_reproducible, "shp_gemeinde.gpkg"))
 df_regiostar_complete <- sf::st_read(file.path(path_base_geodata_reproducible, "df_regiostar_complete.gpkg"))

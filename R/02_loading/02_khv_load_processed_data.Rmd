@@ -19,7 +19,7 @@ list_khv_geocoded <- list()
 
 # Loop through each year and import the corresponding geocoded CSV
 for (year in all_years_khv) {
-  file_path <- fs::path(path_base_khv_data_reproducible, paste0("df_khv_", year, "_slim_geocoded.csv"))
+  file_path <- fs::path(path_base_khv_data, paste0("df_khv_", year, "_slim_geocoded.csv"))
   
   if (fs::file_exists(file_path)) {
     df <- readr::read_csv(file_path, show_col_types = FALSE)

@@ -18,7 +18,7 @@ all_years_hospital_reports <- c(2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 
 # Generic function to load datasets per year
 load_hospital_data <- function(prefix) {
   for (year in all_years_hospital_reports) {
-    file_path <- here(path_base_hospital_reports_data_reproducible, paste0(prefix, year, ".csv"))
+    file_path <- here(path_base_hospital_reports_data, paste0(prefix, year, ".csv"))
     assign(paste0(prefix, year), read_csv(file_path, show_col_types = FALSE), envir = .GlobalEnv)
   }
 }
@@ -30,7 +30,7 @@ load_hospital_data("df_hospital_staff_")
 
 # Import the merged and geocoded locations reference dataframe
 df_hospital_location_merged_geocoded <- read_csv(
-  here(path_base_hospital_reports_data_reproducible, "df_hospital_location_merged_geocoded.csv"),
+  here(path_base_hospital_reports_data, "df_hospital_location_merged_geocoded.csv"),
   show_col_types = FALSE
 )
 ```
