@@ -1,62 +1,47 @@
----
-title: "functions_initial_data_cleaning"
-author: "Niklas Pawelzik"
-date: "2024-06-27"
-output: html_document
----
+#### Loading Required Packages ####
+if (!requireNamespace("rmarkdown", quietly = TRUE)) install.packages("rmarkdown")
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
-```
-
-# import basic packages
-
-```{r import packages}
-# Define required packages
-packages <- c(
-  "tidyverse",
-  "sf",
-  "giscoR",
-  "rmapshaper",
-  "rnaturalearth",
-  "rnaturalearthhires",
-  "maps",
-  "tidygeocoder",
-  "spdep",
-  "GGally",
-  "scales",
-  "RColorBrewer",
-  "viridis",
-  "cols4all",
-  "did",
-  "synthdid",
-  "fixest",
-  "plm",
-  "sandwich",
-  "lmtest",
-  "eurostat",
-  "httr",
-  "xml2",
-  "knitr",
-  "kableExtra",
-  "zoo",
-  "readxl"
+required_packages <- c(
+  "tidyverse", "sf", "giscoR", "rmapshaper", "rnaturalearth", "rnaturalearthhires",
+  "maps", "tidygeocoder", "spdep", "GGally", "scales", "RColorBrewer", "viridis",
+  "cols4all", "did", "synthdid", "fixest", "plm", "sandwich", "lmtest",
+  "eurostat", "httr", "xml2", "knitr", "kableExtra", "zoo", "readxl", "here"
 )
 
-# Install any that are missing
-missing <- setdiff(packages, rownames(installed.packages()))
-if (length(missing)) install.packages(missing, quiet = TRUE)
+# Install missing packages
+missing_packages <- setdiff(required_packages, rownames(installed.packages()))
+if (length(missing_packages) > 0) {
+  install.packages(missing_packages)
+}
 
-# Load all packages quietly, suppress startup messages and output
-invisible(suppressPackageStartupMessages(
-  lapply(packages, library, character.only = TRUE)
-))
+# Load all packages
+invisible(lapply(required_packages, library, character.only = TRUE))
 
-```
+cat("All required packages loaded.\n\n")
 
-# define functions for initial data cleaning 
 
-```{r function to extract info on hospital and POC}
+#### Defining Useful Paths ####
+path_base_geodata_reproducible <- here::here("data", "reproducible", "geodata")
+path_base_hospital_reports_data_reproducible <- here::here("data", "reproducible", "hospital_reports_data")
+path_base_khv_data_reproducible <- here::here("data", "reproducible", "khv_data")
+path_base_wk_data_reproducible <- here::here("data", "reproducible", "wk_data")
+
+
+path_output_figures <- here::here("output", "figures")
+path_output_reports <- here::here("output", "reports")
+
+# Optionally, create folders if they don't exist
+dir.create(path_output_figures, recursive = TRUE, showWarnings = FALSE)
+dir.create(path_output_reports, recursive = TRUE, showWarnings = FALSE)
+
+cat("Output paths set and ensured.\n\n")
+
+
+#### Defining Helper Functions ####
+
+#### Define helper functions for XML extraction (hospital reports) ####
+
+# Function to extract hospital location and contact information
 extract_standortdaten <- function(element) {
   standort_node <- xml_find_first(
     element,
@@ -97,16 +82,16 @@ extract_standortdaten <- function(element) {
     element,
     xpath = "//Verantwortlicher_Erstellung"
   )
-
-
-
+  
+  
+  
   name <- xml_text(
     standort_node %>%
       xml_find_first(".//Name")
   )
   if (is.na(name)) {
     name <- xml_text(
-    krankenhausname_node
+      krankenhausname_node
     )
   }
   ik_nodes <- xml_find_all(standort_node, ".//IK")
@@ -123,60 +108,60 @@ extract_standortdaten <- function(element) {
     standort_node %>%
       xml_find_first(".//Standortnummer")
   )
-    if (is.na(standortnummer)) {
+  if (is.na(standortnummer)) {
     standortnummer <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer")
+      element %>%
+        xml_find_first(".//Standortnummer")
     )
   }
   standortnummer_alt <- xml_text(
     standort_node %>%
       xml_find_first(".//Standortnummer_alt")
   )
-    if (is.na(standortnummer_alt)) {
+  if (is.na(standortnummer_alt)) {
     standortnummer_alt <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer_alt")
+      element %>%
+        xml_find_first(".//Standortnummer_alt")
     )
   }
   strasse <- xml_text(
     standort_node %>%
       xml_find_first(".//Kontakt_Zugang/Strasse")
   )
-    if (is.na(strasse)) {
+  if (is.na(strasse)) {
     strasse <- xml_text(
-    kontaktdaten_node %>%
-      xml_find_first(".//Hausanschrift/Strasse")
+      kontaktdaten_node %>%
+        xml_find_first(".//Hausanschrift/Strasse")
     )
   }
   hausnummer <- xml_text(
     standort_node %>%
       xml_find_first(".//Kontakt_Zugang/Hausnummer")
   )
-    if (is.na(hausnummer)) {
+  if (is.na(hausnummer)) {
     hausnummer <- xml_text(
-    kontaktdaten_node %>%
-      xml_find_first(".//Hausanschrift/Hausnummer")
+      kontaktdaten_node %>%
+        xml_find_first(".//Hausanschrift/Hausnummer")
     )
   }
   postleitzahl <- xml_text(
     standort_node %>%
       xml_find_first(".//Kontakt_Zugang/Postleitzahl")
   )
-    if (is.na(postleitzahl)) {
+  if (is.na(postleitzahl)) {
     postleitzahl <- xml_text(
-    kontaktdaten_node %>%
-      xml_find_first(".//Hausanschrift/Postleitzahl")
+      kontaktdaten_node %>%
+        xml_find_first(".//Hausanschrift/Postleitzahl")
     )
   }
   ort <- xml_text(
     standort_node %>%
       xml_find_first(".//Kontakt_Zugang/Ort")
   )
-    if (is.na(ort)) {
+  if (is.na(ort)) {
     ort <- xml_text(
-    kontaktdaten_node %>%
-      xml_find_first(".//Hausanschrift/Ort")
+      kontaktdaten_node %>%
+        xml_find_first(".//Hausanschrift/Ort")
     )
   }
   url_zugang <- xml_text(
@@ -185,20 +170,20 @@ extract_standortdaten <- function(element) {
   )
   if (is.na(url_zugang)) {
     url_zugang <- xml_text(
-    kontaktdaten_node %>%
-      xml_find_first(".//URL")
+      kontaktdaten_node %>%
+        xml_find_first(".//URL")
     )
   }
   if (is.na(url_zugang)) {
     url_zugang <- xml_text(
-    krankenhauskontaktdaten_node %>%
-      xml_find_first(".//Kontakt_Zugang/URL_Zugang")
+      krankenhauskontaktdaten_node %>%
+        xml_find_first(".//Kontakt_Zugang/URL_Zugang")
     )
   }
   if (is.na(url_zugang)) {
     url_zugang <- xml_text(
-    element %>%
-      xml_find_first(".//URL")
+      element %>%
+        xml_find_first(".//URL")
     )
   }
   traegerart <- xml_text(
@@ -207,8 +192,8 @@ extract_standortdaten <- function(element) {
   )
   if (is.na(traegerart)) {
     traegerart <- xml_text(
-    krankenhaustraeger_node %>%
-      xml_find_first(".//Krankenhaustraeger_Art/Sonstiges")
+      krankenhaustraeger_node %>%
+        xml_find_first(".//Krankenhaustraeger_Art/Sonstiges")
     )
   }
   traegername <- xml_text(
@@ -233,7 +218,7 @@ extract_standortdaten <- function(element) {
   )
   telefon_rufnummer <- xml_text(
     verantwortlicher_node %>%
-       xml_find_first(".//Telefon/Rufnummer")
+      xml_find_first(".//Telefon/Rufnummer")
   )
   telefon_durchwahl <- xml_text(
     verantwortlicher_node %>%
@@ -255,8 +240,8 @@ extract_standortdaten <- function(element) {
     verantwortlicher_node %>%
       xml_find_first(".//Email")
   )
-
-
+  
+  
   data.frame(
     Name = name,
     Datum = datum,
@@ -290,9 +275,7 @@ extract_standortdaten <- function(element) {
   )
 }
 
-```
-
-```{r function to extract info on hospital beds and cases}
+# Function to extract hospital case numbers and bed counts
 extract_fallzahlen_bettzahlen <- function(element) {
   standort_node <- xml_find_first(
     element,
@@ -333,7 +316,7 @@ extract_fallzahlen_bettzahlen <- function(element) {
     element,
     xpath = "//Anzahl_Betten"
   )
-
+  
   
   
   name <- xml_text(
@@ -342,7 +325,7 @@ extract_fallzahlen_bettzahlen <- function(element) {
   )
   if (is.na(name)) {
     name <- xml_text(
-    krankenhausname_node
+      krankenhausname_node
     )
   }
   ik_nodes <- xml_find_all(standort_node, ".//IK")
@@ -359,20 +342,20 @@ extract_fallzahlen_bettzahlen <- function(element) {
     standort_node %>%
       xml_find_first(".//Standortnummer")
   )
-    if (is.na(standortnummer)) {
+  if (is.na(standortnummer)) {
     standortnummer <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer")
+      element %>%
+        xml_find_first(".//Standortnummer")
     )
   }
   standortnummer_alt <- xml_text(
     standort_node %>%
       xml_find_first(".//Standortnummer_alt")
   )
-    if (is.na(standortnummer_alt)) {
+  if (is.na(standortnummer_alt)) {
     standortnummer_alt <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer_alt")
+      element %>%
+        xml_find_first(".//Standortnummer_alt")
     )
   }
   vollstationaere_fallzahl <- xml_text(
@@ -394,7 +377,7 @@ extract_fallzahlen_bettzahlen <- function(element) {
   bettenzahl <- xml_text(
     betten_node
   )
-
+  
   # Erstelle den Dataframe "df_KH_QB_info_fallzahlen_und_betten"
   data.frame(
     Name = name,
@@ -410,11 +393,9 @@ extract_fallzahlen_bettzahlen <- function(element) {
   )
 }
 
-```
-
-```{r function to extract info on hospital staff}
+# Function to extract information on hospital staffing
 extract_personal <- function(element) {
-# FIRST: defining main nodes
+  # FIRST: defining main nodes
   standort_node <- xml_find_first(
     element,
     xpath = "//Standortkontaktdaten"
@@ -432,7 +413,7 @@ extract_personal <- function(element) {
     institutionskennzeichen_node <- xml_find_first(element, xpath = "//Institutionskennzeichen")
     krankenhausname_node <- xml_find_first(element, xpath = "//Krankenhaus_Name")
   }
-
+  
   datensatz_node <- xml_find_first(
     element,
     xpath = "//Datensatz"
@@ -533,17 +514,17 @@ extract_personal <- function(element) {
     element,
     xpath = "//Pflegekraefte/Medizinische_Fachangestellte/Personalerfassung_ohne_Fachabteilungszuordnung"
   )
-
-
-
-    # SECOND: defining specific nodes and extracting data
+  
+  
+  
+  # SECOND: defining specific nodes and extracting data
   name <- xml_text(
     standort_node %>%
       xml_find_first(".//Name")
   )
   if (is.na(name)) {
     name <- xml_text(
-    krankenhausname_node
+      krankenhausname_node
     )
   }
   ik <- xml_text(
@@ -552,8 +533,8 @@ extract_personal <- function(element) {
   )
   if (is.na(ik)) {
     ik <- xml_text(
-    institutionskennzeichen_node %>%
-    xml_find_first(".//IK"))
+      institutionskennzeichen_node %>%
+        xml_find_first(".//IK"))
   }
   datum <- xml_text(
     datensatz_node %>%
@@ -563,20 +544,20 @@ extract_personal <- function(element) {
     standort_node %>%
       xml_find_first(".//Standortnummer")
   )
-    if (is.na(standortnummer)) {
+  if (is.na(standortnummer)) {
     standortnummer <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer")
+      element %>%
+        xml_find_first(".//Standortnummer")
     )
   }
   standortnummer_alt <- xml_text(
     standort_node %>%
       xml_find_first(".//Standortnummer_alt")
   )
-    if (is.na(standortnummer_alt)) {
+  if (is.na(standortnummer_alt)) {
     standortnummer_alt <- xml_text(
-    element %>%
-      xml_find_first(".//Standortnummer_alt")
+      element %>%
+        xml_find_first(".//Standortnummer_alt")
     )
   }
   tarifliche_wochenarbeitszeit <- xml_text(
@@ -588,12 +569,12 @@ extract_personal <- function(element) {
         ".//Anzahl_VK"
       )
   )
-    if (is.na(anzahl_vk_ohne_beleg)) {
+  if (is.na(anzahl_vk_ohne_beleg)) {
     anzahl_vk_ohne_beleg <- xml_text(
-    element %>%
-      xml_find_first(".//Personal_des_Krankenhauses/Aerzte/Aerzte_ohne_Belegaerzte/Anzahl")
+      element %>%
+        xml_find_first(".//Personal_des_Krankenhauses/Aerzte/Aerzte_ohne_Belegaerzte/Anzahl")
     )
-    }
+  }
   anzahl_vk_mit_direktem_bv_ohne_beleg <- xml_text(
     aerzte_ohne_beleg_node %>%
       xml_find_first(
@@ -720,12 +701,12 @@ extract_personal <- function(element) {
         ".//Anzahl_VK"
       )
   )
-    if (is.na(anzahl_vk_gesundheits_krankenpfleger)) {
+  if (is.na(anzahl_vk_gesundheits_krankenpfleger)) {
     anzahl_vk_gesundheits_krankenpfleger <- xml_text(
-    element %>%
-      xml_find_first(".//Personal_des_Krankenhauses/Pflegekraefte/Gesundheits_Krankenpfleger/Anzahl")
+      element %>%
+        xml_find_first(".//Personal_des_Krankenhauses/Pflegekraefte/Gesundheits_Krankenpfleger/Anzahl")
     )
-    }  
+  }  
   anzahl_vk_gesundheits_krankenpfleger_mit_direktem_bv <- xml_text(
     gesundheits_krankenpfleger_node %>%
       xml_find_first(
@@ -1260,9 +1241,9 @@ extract_personal <- function(element) {
         ".//Versorgungsform/Stationaere_Versorgung/Anzahl_VK"
       )
   )
-
-
-    # THIRD: populating dataframe with extracted node data
+  
+  
+  # THIRD: populating dataframe with extracted node data
   data.frame(
     Name = name,
     Datum = datum,
@@ -1381,78 +1362,66 @@ extract_personal <- function(element) {
     Anzahl_VK_medizinische_fachangestellte_Ohne_direktem_BV_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_ohne_direktem_bv_ohne_fachabteilung,
     Anzahl_VK_medizinische_fachangestellte_Ambulante_Versorgung_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_ambulante_versorgung_ohne_fachabteilung,
     Anzahl_VK_medizinische_fachangestellte_Stationaere_Versorgung_ohne_fachabteilung = anzahl_vk_medizinische_fachangestellte_stationaere_versorgung_ohne_fachabteilung
-)
+  )
 }
-```
 
 
-```{r function to plot NAs}
-plot_na_matrix <- function(df) {     
-  # Preparing the dataframe for heatmaps     
-  df_heat <- df %>%        
-    pivot_longer(cols = everything(),
-                 names_to = "x") %>%
+#### Define additional helper functions ####
+
+# Function to plot missing values (NAs) in a dataframe
+plot_na_matrix <- function(df) {
+  df_heat <- df %>%
+    pivot_longer(cols = everything(), names_to = "x") %>%
     group_by(x) %>%
-    mutate(y = row_number())
-  # Ensuring the order of columns is kept as it is
-  df_heat <- df_heat %>%
+    mutate(y = row_number()) %>%
     ungroup() %>%
-    mutate(x = factor(x,levels = colnames(df)))
-  # Plotting data
-  g <- ggplot(data = df_heat, aes(x=x, y=y, fill=value)) +
-    geom_tile() +
-    theme(legend.position = "none",
-          axis.title.y=element_blank(),
-          axis.text.y =element_blank(),
-          axis.ticks.y=element_blank(),
-          axis.title.x=element_blank(),
-          axis.text.x = element_text(angle = 90, hjust = 1))
-     # Returning the plot
-    g 
-}
-```
-
-# define functions for initial data cleaning 
-```{r cleaning function}
-process_and_clean_WK_file <- function(df) {
-  # Step 1: Identify the year-related columns (those that start with a four-digit year)
-  year_columns <- grep("^[0-9]{4}", names(df), value = TRUE)
+    mutate(x = factor(x, levels = colnames(df)))
   
-  # Step 2: Convert year-related columns to character type to avoid conflicts during pivot
+  ggplot(df_heat, aes(x = x, y = y, fill = value)) +
+    geom_tile() +
+    theme(
+      legend.position = "none",
+      axis.title.y = element_blank(),
+      axis.text.y = element_blank(),
+      axis.ticks.y = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = element_text(angle = 90, hjust = 1)
+    )
+}
+
+
+# Function to process and clean WK data
+process_and_clean_WK_file <- function(df) {
+  year_columns <- grep("^[0-9]{4}", names(df), value = TRUE)
   df[year_columns] <- lapply(df[year_columns], as.character)
   
-  # Step 3: Reshape the data to long format
   df_long <- df %>%
-    pivot_longer(cols = all_of(year_columns), 
-                 names_to = "Year_and_Statistic", 
+    pivot_longer(cols = all_of(year_columns),
+                 names_to = "Year_and_Statistic",
                  values_to = "Value") %>%
-    separate(Year_and_Statistic, into = c("Year", "Statistic"), sep = "\n")  # Split Year and Statistic
+    separate(Year_and_Statistic, into = c("Year", "Statistic"), sep = "\n")
   
-  # Step 4: Replace "k.A." with NA
   df_long[df_long == "k.A."] <- NA
   
-  # Step 5: Filter out rows where key columns are NA
   df_filtered <- df_long %>%
-    filter(!(is.na(Kommune) & is.na(GKZ) & is.na(ARS) & is.na(Bundesland) & is.na(Landkreis) & is.na(Demografietyp)))
-    
-  # Step 6: Clean the 'Value' column to remove non-numeric characters (e.g., commas, spaces)
-  df_filtered$Value <- gsub("\\.(?=[0-9]{3}(,|$))", "", df_filtered$Value, perl = TRUE)  # Remove thousands separator
-  df_filtered$Value <- gsub(",", ".", df_filtered$Value)  # Replace commas with periods for decimals
-  df_filtered$Value <- gsub("[^0-9.-]", "", df_filtered$Value)  # Remove any characters except digits, periods, and negatives
+    filter(!(is.na(Kommune) & is.na(GKZ) & is.na(ARS) &
+               is.na(Bundesland) & is.na(Landkreis) & is.na(Demografietyp)))
   
-  # Step 7: Convert 'Value' column to numeric type
-  df_filtered$Value <- as.numeric(df_filtered$Value) 
+  df_filtered$Value <- gsub("\\.(?=[0-9]{3}(,|$))", "", df_filtered$Value, perl = TRUE)
+  df_filtered$Value <- gsub(",", ".", df_filtered$Value)
+  df_filtered$Value <- gsub("[^0-9.-]", "", df_filtered$Value)
+  df_filtered$Value <- as.numeric(df_filtered$Value)
   
   return(df_filtered)
 }
-```
 
-```{r}
-# Function to convert long-format dataframe back into wide format
+# Function to reformat a cleaned long-format WK dataset back to wide format
 convert_to_wide <- function(df_long) {
   df_wide <- df_long %>%
     pivot_wider(names_from = Statistic, values_from = Value)
   
   return(df_wide)
 }
-```
+
+
+cat("Helper functions ready.\n\n")

@@ -1,20 +1,19 @@
-# 00_1_master_run_reproducible.R
+# 00_master/00_master_run_reproducible.R
 # Master Script: Load Packages, Load Processed Data, Run Main Analysis
 
 cat("\n==== Basic Setup ====\n")
 
-# Load packages and basic setup
-source(here::here("R", "00_load_packages_paths_functions.R"))
-
+# Load packages, paths, and functions
+source(here::here("R", "00_setup", "00_setup_packages_paths_functions.R"))
 
 # === Load processed (pre-cleaned) data ===
 cat("\n==== Loading Processed Data ====\n")
 
 rmd_load_files <- list(
-  here::here("R", "02_geodata_load_processed_data.Rmd"),
-  here::here("R", "02_khv_load_processed_data.Rmd"),
-  here::here("R", "02_wk_load_processed_data.Rmd"),
-  here::here("R", "02_hospital_reports_load_processed_data.Rmd")
+  here::here("R", "02_loading", "02_geodata_load_processed_data.Rmd"),
+  here::here("R", "02_loading", "02_khv_load_processed_data.Rmd"),
+  here::here("R", "02_loading", "02_wk_load_processed_data.Rmd"),
+  here::here("R", "02_loading", "02_hospital_reports_load_processed_data.Rmd")
 )
 
 for (file in rmd_load_files) {
@@ -29,14 +28,13 @@ for (file in rmd_load_files) {
   }
 }
 
-
 # === Merge data and run analyses ===
 cat("\n==== Merging Data and Running Analyses ====\n")
 
 rmd_analysis_files <- list(
-  here::here("R", "03_1_merge_and_prepare_data.Rmd"),
-  here::here("R", "03_2_estimate_main_models.Rmd"),
-  here::here("R", "03_3_conduct_robustness_tests.Rmd")
+  here::here("R", "03_analysis", "03_1_merge_and_prepare_data.Rmd"),
+  here::here("R", "03_analysis", "03_2_estimate_main_models.Rmd"),
+  here::here("R", "03_analysis", "03_3_conduct_robustness_tests.Rmd")
 )
 
 for (file in rmd_analysis_files) {
@@ -51,5 +49,5 @@ for (file in rmd_analysis_files) {
   }
 }
 
-
 cat("\n==== Reproducible Project Setup Completed ====\n")
+

@@ -796,35 +796,35 @@ df_combined_hospital_data_employment &lt;- df_confirmed_closures_ARS %&gt;%
 <pre class="r"><code># Check outputs
 head(df_dependent_variables_shapes)</code></pre>
 <pre><code>## # A tibble: 6 × 30
-##   Kommune GKZ      ARS          Bundesland Landkreis Demografietyp  Year employment_level employment_level_fem…¹ Beschäftigungsquote …² RegioStaR4 vbgemrs_23 RegioStaR_NameStadtr…³
-##   &lt;chr&gt;   &lt;chr&gt;    &lt;chr&gt;        &lt;chr&gt;      &lt;chr&gt;     &lt;chr&gt;         &lt;dbl&gt;            &lt;dbl&gt;                  &lt;dbl&gt;                  &lt;dbl&gt; &lt;chr&gt;      &lt;chr&gt;      &lt;chr&gt;                 
-## 1 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2006             36.8                   35.9                   27   12         53340002   Aachen                
-## 2 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2007             37.3                   36.2                   28.1 12         53340002   Aachen                
-## 3 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2008             38.4                   37.5                   29.8 12         53340002   Aachen                
-## 4 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2009             38.7                   38.2                   31.2 12         53340002   Aachen                
-## 5 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2010             39                     38.8                   32.1 12         53340002   Aachen                
-## 6 Aachen  05334002 053340002002 Nordrhein… Städtere… Typ 7          2011             43.8                   42.9                   36.9 12         53340002   Aachen                
-## # ℹ abbreviated names: ¹​employment_level_female, ²​`Beschäftigungsquote 55- bis 64-Jährige (%)`, ³​RegioStaR_NameStadtregion
-## # ℹ 17 more variables: RegioStaR2 &lt;chr&gt;, RegioStaR7 &lt;chr&gt;, vbgnam_23 &lt;chr&gt;, RegioStaRGem5 &lt;chr&gt;, RegioStaR5 &lt;chr&gt;, RegioStaRGem7 &lt;chr&gt;, fl_23 &lt;chr&gt;, bev_23 &lt;chr&gt;,
-## #   RegioStaR17 &lt;chr&gt;, name_23 &lt;chr&gt;, gemrs_23 &lt;chr&gt;, gem_23 &lt;chr&gt;, RegioStaR_Stadtregion &lt;chr&gt;, RegioStaR4from5 &lt;chr&gt;, RegioStaR6from7 &lt;chr&gt;, geom &lt;MULTIPOLYGON [°]&gt;,
-## #   hospital_closure &lt;lgl&gt;</code></pre>
+##   Kommune GKZ      ARS      Bundesland Landkreis Demografietyp  Year employment_level employment_level_fem…¹ Beschäftigungsquote …² RegioStaR4 vbgemrs_23
+##   &lt;chr&gt;   &lt;chr&gt;    &lt;chr&gt;    &lt;chr&gt;      &lt;chr&gt;     &lt;chr&gt;         &lt;dbl&gt;            &lt;dbl&gt;                  &lt;dbl&gt;                  &lt;dbl&gt; &lt;chr&gt;      &lt;chr&gt;     
+## 1 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2006             36.8                   35.9                   27   12         53340002  
+## 2 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2007             37.3                   36.2                   28.1 12         53340002  
+## 3 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2008             38.4                   37.5                   29.8 12         53340002  
+## 4 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2009             38.7                   38.2                   31.2 12         53340002  
+## 5 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2010             39                     38.8                   32.1 12         53340002  
+## 6 Aachen  05334002 0533400… Nordrhein… Städtere… Typ 7          2011             43.8                   42.9                   36.9 12         53340002  
+## # ℹ abbreviated names: ¹​employment_level_female, ²​`Beschäftigungsquote 55- bis 64-Jährige (%)`
+## # ℹ 18 more variables: RegioStaR_NameStadtregion &lt;chr&gt;, RegioStaR2 &lt;chr&gt;, RegioStaR7 &lt;chr&gt;, vbgnam_23 &lt;chr&gt;, RegioStaRGem5 &lt;chr&gt;, RegioStaR5 &lt;chr&gt;,
+## #   RegioStaRGem7 &lt;chr&gt;, fl_23 &lt;chr&gt;, bev_23 &lt;chr&gt;, RegioStaR17 &lt;chr&gt;, name_23 &lt;chr&gt;, gemrs_23 &lt;chr&gt;, gem_23 &lt;chr&gt;, RegioStaR_Stadtregion &lt;chr&gt;,
+## #   RegioStaR4from5 &lt;chr&gt;, RegioStaR6from7 &lt;chr&gt;, geom &lt;MULTIPOLYGON [°]&gt;, hospital_closure &lt;lgl&gt;</code></pre>
 <pre class="r"><code>head(df_combined_hospital_data_employment)</code></pre>
 <pre><code>## # A tibble: 6 × 59
-##   IK_Institutionskennzeichen year  Anzahl_Aerzte_VK_ohne_b…¹ Anzahl_VK_gesundheit…² Name  Datum      Standortnummer Standortnummer_alt Adresse Strasse Hausnummer Postleitzahl Ort  
-##   &lt;fct&gt;                      &lt;chr&gt;                     &lt;dbl&gt;                  &lt;dbl&gt; &lt;chr&gt; &lt;date&gt;     &lt;chr&gt;          &lt;chr&gt;              &lt;chr&gt;   &lt;chr&gt;   &lt;chr&gt;      &lt;chr&gt;        &lt;chr&gt;
-## 1 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## 2 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## 3 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## 4 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## 5 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## 6 260101466                  2008                          5                      7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag… 56         22926        Ahre…
-## # ℹ abbreviated names: ¹​Anzahl_Aerzte_VK_ohne_beleg, ²​Anzahl_VK_gesundheits_krankenpfleger
-## # ℹ 46 more variables: URL_Zugang &lt;chr&gt;, Traegername &lt;chr&gt;, Traegerart &lt;chr&gt;, hospital_index &lt;dbl&gt;, Adresse_clean &lt;chr&gt;, index &lt;dbl&gt;, latitude &lt;dbl&gt;, longitude &lt;dbl&gt;,
-## #   closure_context_info &lt;chr&gt;, year_of_closure &lt;fct&gt;, staff_doctors_nurses_numeric &lt;dbl&gt;, match_found &lt;lgl&gt;, matching_dfs &lt;chr&gt;, info_last_match_khv &lt;chr&gt;,
-## #   year_last_match_khv_confirmed &lt;int&gt;, ARS &lt;chr&gt;, geometry_hospital &lt;MULTIPOLYGON [°]&gt;, Kommune &lt;chr&gt;, GKZ &lt;chr&gt;, Bundesland &lt;chr&gt;, Landkreis &lt;chr&gt;, Demografietyp &lt;chr&gt;,
-## #   Year &lt;dbl&gt;, employment_level &lt;dbl&gt;, employment_level_female &lt;dbl&gt;, `Beschäftigungsquote 55- bis 64-Jährige (%)` &lt;dbl&gt;, RegioStaR4 &lt;chr&gt;, vbgemrs_23 &lt;chr&gt;,
-## #   RegioStaR_NameStadtregion &lt;chr&gt;, RegioStaR2 &lt;chr&gt;, RegioStaR7 &lt;chr&gt;, vbgnam_23 &lt;chr&gt;, RegioStaRGem5 &lt;chr&gt;, RegioStaR5 &lt;chr&gt;, RegioStaRGem7 &lt;chr&gt;, fl_23 &lt;chr&gt;, bev_23 &lt;chr&gt;,
-## #   RegioStaR17 &lt;chr&gt;, name_23 &lt;chr&gt;, gemrs_23 &lt;chr&gt;, gem_23 &lt;chr&gt;, RegioStaR_Stadtregion &lt;chr&gt;, RegioStaR4from5 &lt;chr&gt;, RegioStaR6from7 &lt;chr&gt;, …</code></pre>
+##   IK_Institutionskennzeichen year  Anzahl_Aerzte_VK_ohne_beleg Anzahl_VK_gesundheits…¹ Name  Datum      Standortnummer Standortnummer_alt Adresse Strasse
+##   &lt;fct&gt;                      &lt;chr&gt;                       &lt;dbl&gt;                   &lt;dbl&gt; &lt;chr&gt; &lt;date&gt;     &lt;chr&gt;          &lt;chr&gt;              &lt;chr&gt;   &lt;chr&gt;  
+## 1 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## 2 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## 3 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## 4 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## 5 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## 6 260101466                  2008                            5                       7 Klin… 2009-11-23 &lt;NA&gt;           &lt;NA&gt;               Manhag… Manhag…
+## # ℹ abbreviated name: ¹​Anzahl_VK_gesundheits_krankenpfleger
+## # ℹ 49 more variables: Hausnummer &lt;chr&gt;, Postleitzahl &lt;chr&gt;, Ort &lt;chr&gt;, URL_Zugang &lt;chr&gt;, Traegername &lt;chr&gt;, Traegerart &lt;chr&gt;, hospital_index &lt;dbl&gt;,
+## #   Adresse_clean &lt;chr&gt;, index &lt;dbl&gt;, latitude &lt;dbl&gt;, longitude &lt;dbl&gt;, closure_context_info &lt;chr&gt;, year_of_closure &lt;fct&gt;,
+## #   staff_doctors_nurses_numeric &lt;dbl&gt;, match_found &lt;lgl&gt;, matching_dfs &lt;chr&gt;, info_last_match_khv &lt;chr&gt;, year_last_match_khv_confirmed &lt;int&gt;,
+## #   ARS &lt;chr&gt;, geometry_hospital &lt;MULTIPOLYGON [°]&gt;, Kommune &lt;chr&gt;, GKZ &lt;chr&gt;, Bundesland &lt;chr&gt;, Landkreis &lt;chr&gt;, Demografietyp &lt;chr&gt;, Year &lt;dbl&gt;,
+## #   employment_level &lt;dbl&gt;, employment_level_female &lt;dbl&gt;, `Beschäftigungsquote 55- bis 64-Jährige (%)` &lt;dbl&gt;, RegioStaR4 &lt;chr&gt;, vbgemrs_23 &lt;chr&gt;,
+## #   RegioStaR_NameStadtregion &lt;chr&gt;, RegioStaR2 &lt;chr&gt;, RegioStaR7 &lt;chr&gt;, vbgnam_23 &lt;chr&gt;, RegioStaRGem5 &lt;chr&gt;, RegioStaR5 &lt;chr&gt;, RegioStaRGem7 &lt;chr&gt;, …</code></pre>
 <pre class="r"><code># Optional: Check ARS code lengths
 table(nchar(unique(as.character(df_dependent_variables$ARS))))</code></pre>
 <pre><code>## 
@@ -1089,14 +1089,15 @@ df_bracket_approach &lt;- df_demographic_distribution_full_data %&gt;%
 
 df_bracket_approach</code></pre>
 <pre><code>## # A tibble: 6 × 6
-##   Municipality_Type                                   `Without Hospital Closure` `With Hospital Closure` Total      `Share with Hospital Closures` `Share of Hospital Closures`
-##   &lt;chr&gt;                                               &lt;chr&gt;                      &lt;chr&gt;                   &lt;chr&gt;      &lt;chr&gt;                          &lt;chr&gt;                       
-## 1 Metropolis, Regiopolis or Large City (Urban Region) 70 (10)                    12 (1)                  82 (11)    14.63% (9.09%)                 17.39% (2.38%)              
-## 2 Medium-Sized City (Urban Region)                    1374 (737)                 18 (16)                 1392 (753) 1.29% (2.12%)                  26.09% (38.10%)             
-## 3 Small-Town / Village Area (Urban Region)            1895 (268)                 4 (2)                   1899 (270) 0.21% (0.74%)                  5.80% (4.76%)               
-## 4 Central City (Rural Region)                         99 (56)                    9 (5)                   108 (61)   8.33% (8.20%)                  13.04% (11.90%)             
-## 5 Medium-Sized City (Rural Region)                    1136 (647)                 15 (13)                 1151 (660) 1.30% (1.97%)                  21.74% (30.95%)             
-## 6 Small-Town / Village Area (Rural Region)            6335 (585)                 11 (5)                  6346 (590) 0.17% (0.85%)                  15.94% (11.90%)</code></pre>
+##   Municipality_Type                                   Without Hospital Closu…¹ With Hospital Closur…² Total Share with Hospital …³ Share of Hospital Cl…⁴
+##   &lt;chr&gt;                                               &lt;chr&gt;                    &lt;chr&gt;                  &lt;chr&gt; &lt;chr&gt;                  &lt;chr&gt;                 
+## 1 Metropolis, Regiopolis or Large City (Urban Region) 70 (10)                  12 (1)                 82 (… 14.63% (9.09%)         17.39% (2.38%)        
+## 2 Medium-Sized City (Urban Region)                    1374 (737)               18 (16)                1392… 1.29% (2.12%)          26.09% (38.10%)       
+## 3 Small-Town / Village Area (Urban Region)            1895 (268)               4 (2)                  1899… 0.21% (0.74%)          5.80% (4.76%)         
+## 4 Central City (Rural Region)                         99 (56)                  9 (5)                  108 … 8.33% (8.20%)          13.04% (11.90%)       
+## 5 Medium-Sized City (Rural Region)                    1136 (647)               15 (13)                1151… 1.30% (1.97%)          21.74% (30.95%)       
+## 6 Small-Town / Village Area (Rural Region)            6335 (585)               11 (5)                 6346… 0.17% (0.85%)          15.94% (11.90%)       
+## # ℹ abbreviated names: ¹​`Without Hospital Closure`, ²​`With Hospital Closure`, ³​`Share with Hospital Closures`, ⁴​`Share of Hospital Closures`</code></pre>
 </div>
 <div id="parallel-trends-visualization" class="section level1">
 <h1>Parallel Trends Visualization</h1>
