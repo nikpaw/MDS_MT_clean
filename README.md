@@ -8,17 +8,17 @@ It contains the full reproducible codebase, processed datasets, and output files
 
 ## Table of Contents
 
--    [Project Overview](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#project-overview)
+-    [Project Overview](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Folder Structure](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#folder-structure)
+-    [Folder Structure](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [How to Reproduce the Results](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#how-to-reproduce-the-results)
+-    [How to Reproduce the Results](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Data Sources](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#data-sources)
+-    [Data Sources](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [Software Requirements](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#software-requirements)
+-    [Software Requirements](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
--    [License](https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#license)
+-    [License](https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview)
 
 ## Project Overview
 
