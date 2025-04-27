@@ -3,9 +3,10 @@
 # DATA: Exclude large local files
 # ============================
 
-# Raw data (never tracked)
+# Data and Outputfiles
 data/raw/
-
+data/processed/
+output/
 
 #Template for AL projects for Dynamics 365 Business Central
 #launch.json folder
