@@ -38,23 +38,23 @@ Findings indicate persistent and statistically significant reductions in local e
 
 ```         
 ├── data/
-│   ├── raw/                  # Raw source data (only for full rebuild, work in progress)
-│   ├── processed/            # Cleaned and processed datasets (created if running from raw, work in progress)
-│   ├── reproducible/         # Final datasets for reproduction (recommended default)
+│   ├── raw/                  # Raw source data (internal use, created for running from raw data)
+│   ├── processed/            # Cleaned and processed datasets (internal use, created for running from raw data)
+│   ├── reproducible/         # Final datasets for reproduction
 │   └── supplementary_files/  # Manually added research or matching files
 ├── output/
 │   ├── reports/              # Rendered HTML reports
 │   └── figures/              # Figures and plots
 ├── R/                        # Scripts and RMarkdown files
 ├── 00_master/                # Scripts controlling project execution (master scripts)
-│   ├── 00_master_run_from_raw.R           # Master script for full rebuild from raw data (optional, work in progress)
-│   └── 00_master_run_reproducible.R        # Master script for reproducible setup (recommended default)
+│   └── 00_master_run_reproducible.R        # Master script for reproducible setup 
 ├── 00_setup/                 # Scripts setting up the environment (packages, paths, functions)
-│   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (optional, work in progress)
-│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions (recommended default)
-├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets
+│   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (internal use, created for running from raw data)
+│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions for  raw data (internal use, created for running from raw data)
+│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions
+├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets  (internal use, created for running from raw data)
 │   ├── 01_geodata_load_and_clean.Rmd       # Load and clean geospatial data
-│   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data (work in progress)
+│   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data
 │   ├── 01_khv_load_and_clean.Rmd           # Load and clean KHV dataset
 │   └── 01_wk_download_and_clean.Rmd        # Download and clean Wegweiser Kommune data
 ├── 02_loading/               # RMarkdown scripts loading processed datasets for analysis
@@ -98,16 +98,6 @@ This script will:
 -   Conduct DiD estimation and robustness checks.
 
 -   Generate outputs (reports, figures, tables).
-
-### Full Rebuild from Raw Data (Under Development)
-
-If preferred, the full rebuild path can be initiated with:
-
-```         
-source("00_master/00_master_run_from_raw.R") 
-```
-
-**Note:** This process is substantially more time-intensive and remains under development.
 
 ## Data Sources
 

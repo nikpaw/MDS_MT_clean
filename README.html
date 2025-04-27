@@ -369,17 +369,17 @@ paper.</p>
 <div id="table-of-contents" class="section level2">
 <h2>Table of Contents</h2>
 <ul>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#project-overview">Project
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">Project
 Overview</a></p></li>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#folder-structure">Folder
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">Folder
 Structure</a></p></li>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#how-to-reproduce-the-results">How
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">How
 to Reproduce the Results</a></p></li>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#data-sources">Data
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">Data
 Sources</a></p></li>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#software-requirements">Software
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">Software
 Requirements</a></p></li>
-<li><p><a href="https://chatgpt.com/c/680baebe-06b0-8011-b832-7f35c8428544#license">License</a></p></li>
+<li><p><a href="https://github.com/nikpaw/MDS_MT_clean/edit/main/README.md#project-overview">License</a></p></li>
 </ul>
 </div>
 <div id="project-overview" class="section level2">
@@ -406,23 +406,22 @@ labor market recovery over the observed period.</p>
 <div id="folder-structure" class="section level2">
 <h2>Folder Structure</h2>
 <pre><code>├── data/
-│   ├── raw/                  # Raw source data (only for full rebuild, work in progress)
-│   ├── processed/            # Cleaned and processed datasets (created if running from raw, work in progress)
-│   ├── reproducible/         # Final datasets for reproduction (recommended default)
+│   ├── raw/                  # Raw source data (internal use, created for running from raw data)
+│   ├── processed/            # Cleaned and processed datasets (internal use, created for running from raw data)
+│   ├── reproducible/         # Final datasets for reproduction
 │   └── supplementary_files/  # Manually added research or matching files
 ├── output/
 │   ├── reports/              # Rendered HTML reports
 │   └── figures/              # Figures and plots
 ├── R/                        # Scripts and RMarkdown files
 ├── 00_master/                # Scripts controlling project execution (master scripts)
-│   ├── 00_master_run_from_raw.R           # Master script for full rebuild from raw data (optional, work in progress)
-│   └── 00_master_run_reproducible.R        # Master script for reproducible setup (recommended default)
+│   └── 00_master_run_reproducible.R        # Master script for reproducible setup 
 ├── 00_setup/                 # Scripts setting up the environment (packages, paths, functions)
-│   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (optional, work in progress)
-│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions (recommended default)
-├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets
+│   ├── 00_setup_download_raw_data.R       # Download raw data from external sources (internal use, created for running from raw data)
+│   └── 00_setup_packages_paths_functions.R# Install/load packages, define paths and helper functions
+├── 01_cleaning/              # RMarkdown scripts cleaning and preparing raw datasets  (internal use, created for running from raw data)
 │   ├── 01_geodata_load_and_clean.Rmd       # Load and clean geospatial data
-│   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data (work in progress)
+│   ├── 01_hospital_reports_load_and_clean.Rmd # Load and clean hospital report data
 │   ├── 01_khv_load_and_clean.Rmd           # Load and clean KHV dataset
 │   └── 01_wk_download_and_clean.Rmd        # Download and clean Wegweiser Kommune data
 ├── 02_loading/               # RMarkdown scripts loading processed datasets for analysis
@@ -438,8 +437,7 @@ labor market recovery over the observed period.</p>
 ├── .gitignore                # Git version control ignore file
 ├── LICENSE                   # Project license
 ├── README.md                 # Project overview and instructions
-├── MDS_MT_clean.Rproj        # RStudio project file
-</code></pre>
+├── MDS_MT_clean.Rproj        # RStudio project file</code></pre>
 </div>
 <div id="how-to-reproduce-the-results" class="section level2">
 <h2>How to Reproduce the Results</h2>
@@ -459,13 +457,6 @@ labor market recovery over the observed period.</p>
 <li><p>Conduct DiD estimation and robustness checks.</p></li>
 <li><p>Generate outputs (reports, figures, tables).</p></li>
 </ul>
-<div id="full-rebuild-from-raw-data-under-development" class="section level3">
-<h3>Full Rebuild from Raw Data (Under Development)</h3>
-<p>If preferred, the full rebuild path can be initiated with:</p>
-<pre><code>source(&quot;00_master/00_master_run_from_raw.R&quot;) </code></pre>
-<p><strong>Note:</strong> This process is substantially more
-time-intensive and remains under development.</p>
-</div>
 </div>
 <div id="data-sources" class="section level2">
 <h2>Data Sources</h2>
